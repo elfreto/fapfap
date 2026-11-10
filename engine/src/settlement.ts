@@ -34,13 +34,17 @@ export interface SettlementInput {
   winner: string;
   payout: Payout;
   abandoned: readonly string[];
+  /** Abandons après le début du 3e pli. */
+  lateAbandoned?: readonly string[];
+  /** Les abandons tardifs paient 2 × la mise (vainqueur par Korat ou resté seul en jeu). */
+  lateDouble?: boolean;
 }
 
 export interface Settlement {
   stake: number;
   winner: string;
   payout: Payout;
-  /** Montant payé par chaque perdant (abandonnant : toujours 1 × la mise). */
+  /** Montant payé par chaque perdant. */
   paidBy: Record<string, number>;
   /** Ce que le vainqueur reçoit de ses adversaires, sans sa propre mise. */
   gain: number;
@@ -54,14 +58,17 @@ export interface Settlement {
  * donc personne ne peut devoir plus que ce qu'il a bloqué et aucun solde ne devient négatif.
  */
 export function settle(input: SettlementInput): Settlement {
-  const { stake, players, winner, payout, abandoned } = input;
+  const { stake, players, winner, payout, abandoned, lateAbandoned = [], lateDouble = false } = input;
   if (!players.includes(winner)) throw new Error("Le vainqueur ne fait pas partie de la manche");
   if (abandoned.includes(winner)) throw new Error("Un joueur qui a abandonné ne peut pas gagner");
   const paidBy: Record<string, number> = {};
   let gain = 0;
   for (const p of players) {
     if (p === winner) continue;
-    const owed = abandoned.includes(p) ? stake : payout === "korat" ? 2 * stake : stake;
+    let owed: number;
+    if (lateAbandoned.includes(p)) owed = lateDouble ? 2 * stake : stake;
+    else if (abandoned.includes(p)) owed = stake; // abandon avant le 3e pli : toujours 1 × la mise
+    else owed = payout === "korat" ? 2 * stake : stake;
     paidBy[p] = owed;
     gain += owed;
   }

@@ -15,10 +15,12 @@ export interface Me {
 }
 
 export interface PublicRound {
-  players: Array<{ id: string; cardsLeft: number; abandoned: boolean; dealtHand?: Card[] }>;
+  players: Array<{ id: string; cardsLeft: number; abandoned: boolean; lateAbandoned?: boolean; dealtHand?: Card[] }>;
   tricks: Trick[];
   turn: string | null;
   result: RoundResult | null;
+  /** Le bouton Abandonner est encore disponible (avant le début du 3e pli). */
+  abandonOpen?: boolean;
 }
 
 export interface PublicTable {

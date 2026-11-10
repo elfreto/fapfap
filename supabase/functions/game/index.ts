@@ -102,11 +102,13 @@ function publicRound(r: E.RoundState | null) {
       id: p,
       cardsLeft: r.hands[p]!.length,
       abandoned: r.abandoned.includes(p),
+      lateAbandoned: (r.lateAbandoned ?? []).includes(p),
       dealtHand: showAll ? r.dealtHands[p] : undefined,
     })),
     tricks: r.tricks,
     turn: r.turn,
     result: r.result,
+    abandonOpen: !r.result && !E.thirdTrickStarted(r),
   };
 }
 
@@ -196,6 +198,9 @@ async function leaveCurrent(player: Player) {
   let round = t.state.round;
   let extra: ReturnType<typeof afterRound> | null = null;
   if (round && !round.result && round.players.includes(player.id) && !round.abandoned.includes(player.id)) {
+    if (!E.canAbandon(round, player.id)) {
+      throw new HttpError(400, "À partir du 3e pli, on ne peut plus quitter la manche : seul le délai de 30 s fait abandonner");
+    }
     round = E.abandon(round, player.id);
   }
   const seats = t.seats.filter((s) => s !== player.id);

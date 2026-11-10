@@ -41,10 +41,23 @@ export function Rules({ onClose }: { onClose: () => void }) {
         </ol>
         <p>À égalité, la plus petite somme gagne, puis le joueur servi en premier.</p>
         <h3>Abandon</h3>
-        <p>
-          Tout joueur peut abandonner à tout moment. Il paie 1 × la mise au vainqueur, même en cas de Korat. S'il ne reste
-          qu'un joueur, il gagne la manche.
-        </p>
+        <ul>
+          <li>
+            Le bouton « Abandonner » est disponible après la distribution, jusqu'à ce que le vainqueur du 2e pli joue la
+            première carte du 3e pli. Ensuite il disparaît : seul le délai de 30 s fait abandonner.
+          </li>
+          <li>Abandon avant le 3e pli : vous payez 1 × la mise au vainqueur, même s'il gagne par Korat.</li>
+          <li>Abandon à partir du 3e pli (30 s écoulées) : 1 × la mise, ou 2 × si le vainqueur gagne par Korat.</li>
+          <li>Vos cartes restantes sont retirées ; celles déjà posées restent visibles mais ne peuvent plus gagner.</li>
+          <li>
+            Si vous deviez mener, la main passe au joueur qui avait la plus haute carte de l'enseigne demandée au pli
+            précédent (au 1er pli : au joueur suivant).
+          </li>
+          <li>
+            S'il ne reste qu'un joueur, il gagne aussitôt : ceux qui ont abandonné avant le 3e pli paient 1 × la mise, ceux
+            qui ont abandonné ensuite paient 2 × la mise.
+          </li>
+        </ul>
         <p className="muted">Les crédits sont virtuels : ils n'ont aucune valeur et ne peuvent pas être échangés contre de l'argent.</p>
       </div>
     </div>
