@@ -1,9 +1,13 @@
 {
   "name": "fapfap",
   "private": true,
-  "workspaces": ["engine"],
+  "workspaces": [
+    "engine",
+    "web"
+  ],
   "scripts": {
     "test": "npm test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build -w web"
   }
 }
