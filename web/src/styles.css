@@ -65,7 +65,7 @@ input, select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 
 .board-wrap { min-height: 0; min-width: 0; container-type: size; display: grid; place-items: center; }
 .board {
   position: relative; width: min(100cqw, 100cqh); aspect-ratio: 1; container-type: inline-size;
-  --cw: 10.5cqw; --ch: calc(var(--cw) * 1.42);
+  --cw: 11cqw; --ch: calc(var(--cw) * 1.4);
   background: radial-gradient(circle at 50% 45%, #1d7a4c, #0e5534 70%);
   border: max(6px, 2cqw) solid #7a4a24; border-radius: 4cqw;
   box-shadow: inset 0 0 0 2px #c9934f, inset 0 0 4cqw #0008, 0 8px 24px #000a;
@@ -91,12 +91,10 @@ input, select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 
 .seat-left .played-cards, .seat-right .played-cards { flex-direction: column; }
 .played-cards:empty { display: none; }
 .board .card-sm { width: var(--cw); height: var(--ch); border-radius: 1.2cqw; }
-.board .card-sm .card-corner { top: 0.5cqw; left: 0.8cqw; font-size: 2.5cqw; }
-.board .card-sm .card-center { font-size: 4cqw; margin-top: 1.5cqw; }
 .seat-top .played-cards .card + .card, .seat-bottom .played-cards .card + .card { margin-left: calc(var(--cw) / -3); }
 .seat-left .played-cards .card + .card, .seat-right .played-cards .card + .card { margin-top: calc(var(--ch) / -3); }
 .card.is-old, .card.is-won { filter: brightness(0.85); }
-.card.is-won::after { content: ""; position: absolute; top: 0.8cqw; left: 50%; width: 1.6cqw; height: 1.6cqw; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 1px #0006; }
+.card.is-won { box-shadow: inset 0 0 0 2px #d9a93a, 0 2px 6px #0006; }
 .card.is-current { box-shadow: 0 0 0 2px var(--gold), 0 3px 8px #000a; z-index: 1; }
 .board-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 38cqw; display: grid; gap: 1cqw; justify-items: center; text-align: center; font-size: clamp(0.65rem, 3.2cqw, 1rem); }
 .board-center p { margin: 0; }
@@ -110,16 +108,14 @@ input, select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 
 /* Cartes : la carte la plus récente recouvre le tiers de la précédente */
 .card { position: relative; flex: none; background: var(--paper); border-radius: 8px; border: 1px solid #0003; box-shadow: 0 2px 6px #0006; display: grid; place-items: center; padding: 0; transition: transform 0.12s ease, box-shadow 0.12s ease; }
 .card.red { color: var(--red); }
+.card-svg { position: absolute; inset: 0; width: 100%; height: 100%; fill: currentColor; font-family: Georgia, "Times New Roman", serif; }
+.cs-rank { font-size: 22px; font-weight: 700; }
+.cs-suit { font-size: 17px; }
+.cs-pip { font-size: 25px; }
 .card.black { color: var(--black); }
-.card-md { width: 58px; height: 84px; }
-.card-lg { width: 66px; height: 96px; }
-.card-sm { width: 36px; height: 52px; border-radius: 5px; }
-.card-corner { position: absolute; top: 4px; left: 5px; display: grid; line-height: 1; font-size: 0.9rem; justify-items: center; }
-.card-sm .card-corner { top: 2px; left: 3px; font-size: 0.7rem; }
-.card-center { font-size: 1.9rem; }
-.card-sm .card-center { font-size: 1rem; margin-top: 8px; }
-.card-name { position: absolute; bottom: 3px; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.8; }
-.card-sm .card-name { display: none; }
+.card-md { width: 58px; height: 81px; }
+.card-lg { width: 72px; height: 101px; }
+.card-sm { width: 36px; height: 50px; border-radius: 5px; }
 .card-tag { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 0.7rem; white-space: nowrap; color: var(--ink); background: #0008; padding: 1px 6px; border-radius: 999px; }
 .card-sm .card-tag { top: auto; bottom: -14px; font-size: 0.6rem; padding: 0 4px; }
 button.card { cursor: pointer; }
@@ -158,8 +154,7 @@ button.card { cursor: pointer; }
 @media (orientation: landscape) and (max-height: 500px) {
   .table-screen { gap: 4px; padding-top: 6px; padding-bottom: 6px; }
   .topbar { font-size: 0.8rem; }
-  .card-lg { width: 50px; height: 72px; }
-  .card-lg .card-center { font-size: 1.5rem; }
+  .card-lg { width: 58px; height: 81px; }
   .hand { gap: 4px; padding-top: 10px; }
   .hint { display: none; }
 }
