@@ -1,0 +1,9 @@
+{
+  "name": "fapfap",
+  "private": true,
+  "workspaces": ["engine"],
+  "scripts": {
+    "test": "npm test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
