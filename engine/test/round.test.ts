@@ -4,6 +4,7 @@ import {
   type RoundState,
   RuleError,
   abandon,
+  canAbandon,
   legalCards,
   newRound,
   nextFirstPlayer,
@@ -219,6 +220,100 @@ describe("abandon et minuteur", () => {
   });
 });
 
+describe("fenêtre d'abandon et paiements selon le moment", () => {
+  function toThirdTrick(players: string[]): RoundState {
+    const hands = Object.fromEntries(players.map((p) => [p, structuredClone(HANDS3[p as "A"])]));
+    let s = startRound({ stake: 100, players, hands });
+    const seq: Record<string, Card[]> = {
+      A: [c("zing", 10), c("koubi", 10)],
+      B: [c("zing", 8), c("koubi", 9)],
+      C: [c("zing", 3), c("koubi", 8)],
+    };
+    for (let t = 0; t < 2; t++) for (const p of players) s = playCard(s, p, seq[p]![t]!);
+    return s;
+  }
+
+  it("le bouton reste possible jusqu'à ce que le vainqueur du 2e pli joue la 3e carte", () => {
+    let s = toThirdTrick(["A", "B", "C"]);
+    expect(s.tricks).toHaveLength(3);
+    expect(canAbandon(s, "B")).toBe(true);
+    s = playCard(s, "A", c("zing", 9));
+    expect(canAbandon(s, "B")).toBe(false);
+    expect(canAbandon(s, "C")).toBe(false);
+    expectRule(() => abandon(s, "C"), "abandon_closed");
+    expectRule(() => abandon(s, "B"), "abandon_closed");
+  });
+
+  it("après le début du 3e pli, seul le minuteur fait abandonner : 1 × la mise sans Korat", () => {
+    let s = playCard(toThirdTrick(["A", "B", "C"]), "A", c("zing", 9));
+    s = timeout(s, "B");
+    expect(s.lateAbandoned).toEqual(["B"]);
+    s = playCard(s, "C", c("tchaka", 8));
+    s = playCard(s, "A", c("tchaka", 4));
+    s = playCard(s, "C", c("tchaka", 9));
+    s = playCard(s, "C", c("black", 8));
+    s = playCard(s, "A", c("black", 5));
+    expect(s.result).toMatchObject({ winner: "C", reason: "fifth_trick", payout: "simple" });
+    expect(s.result!.settlement.paidBy).toEqual({ A: 100, B: 100 });
+  });
+
+  it("abandon tardif qui laisse un seul joueur : victoire double (2 × la mise)", () => {
+    let s = playCard(toThirdTrick(["A", "B"]), "A", c("zing", 9));
+    s = timeout(s, "B");
+    expect(s.result).toMatchObject({ winner: "A", reason: "last_standing" });
+    expect(s.result!.settlement.net).toEqual({ A: 180, B: -200 });
+  });
+
+  it("abandon tardif puis Korat : l'abandonnant paie 2 × la mise", () => {
+    let s = startRound({
+      stake: 100,
+      players: ["A", "B", "C"],
+      hands: {
+        A: [c("koubi", 10), c("koubi", 9), c("tchaka", 10), c("tchaka", 9), c("zing", 3)],
+        B: [c("koubi", 8), c("koubi", 6), c("tchaka", 8), c("tchaka", 6), c("black", 9)],
+        C: [c("koubi", 7), c("koubi", 4), c("black", 8), c("black", 7), c("zing", 10)],
+      },
+    });
+    s = playCard(s, "A", c("koubi", 10));
+    s = playCard(s, "B", c("koubi", 8));
+    s = playCard(s, "C", c("koubi", 7));
+    s = playCard(s, "A", c("koubi", 9));
+    s = playCard(s, "B", c("koubi", 6));
+    s = playCard(s, "C", c("koubi", 4));
+    s = playCard(s, "A", c("tchaka", 10));
+    s = playCard(s, "B", c("tchaka", 8));
+    s = timeout(s, "C");
+    s = playCard(s, "A", c("tchaka", 9));
+    s = playCard(s, "B", c("tchaka", 6));
+    s = playCard(s, "A", c("zing", 3));
+    s = playCard(s, "B", c("black", 9));
+    expect(s.result).toMatchObject({ winner: "A", payout: "korat" });
+    expect(s.result!.settlement.paidBy).toEqual({ B: 200, C: 200 });
+  });
+
+  it("si l'abandonnant devait mener, la main passe à la plus haute carte de l'enseigne du pli précédent", () => {
+    let s = startRound({
+      stake: 100,
+      players: ["A", "B", "C", "D"],
+      hands: {
+        A: [c("koubi", 4), c("tchaka", 10), c("tchaka", 9), c("black", 9), c("black", 8)],
+        B: [c("koubi", 7), c("tchaka", 8), c("tchaka", 6), c("black", 6), c("zing", 10)],
+        C: [c("koubi", 9), c("zing", 9), c("zing", 8), c("black", 5), c("tchaka", 5)],
+        D: [c("zing", 6), c("zing", 5), c("tchaka", 3), c("black", 4), c("black", 7)],
+      },
+    });
+    s = playCard(s, "A", c("koubi", 4));
+    s = playCard(s, "B", c("koubi", 7));
+    s = playCard(s, "C", c("koubi", 9));
+    s = playCard(s, "D", c("zing", 6));
+    expect(s.turn).toBe("C");
+    s = abandon(s, "C");
+    // D est le suivant dans le sens horaire, mais B avait le plus haut koubi restant.
+    expect(s.turn).toBe("B");
+    expect(s.tricks[1]!.leader).toBe("B");
+  });
+});
+
 describe("victoire spéciale à la distribution", () => {
   it("arrête la manche sans pli et montre toutes les mains", () => {
     const s = startRound({
@@ -274,7 +369,12 @@ describe("parties aléatoires (propriétés)", () => {
         if (++guard > 100) throw new Error("manche sans fin");
         const p = s.turn!;
         if (rnd(40) === 0) {
-          s = rnd(2) ? timeout(s, p) : abandon(s, p);
+          s = rnd(2) || !canAbandon(s, p) ? timeout(s, p) : abandon(s, p);
+          continue;
+        }
+        const others = s.players.filter((q) => q !== p && canAbandon(s, q));
+        if (others.length && rnd(120) === 0) {
+          s = abandon(s, others[rnd(others.length)]!);
           continue;
         }
         const legal = legalCards(s, p);
@@ -285,6 +385,9 @@ describe("parties aléatoires (propriétés)", () => {
       const total = Object.values(settlement.net).reduce((a, b) => a + b, 0);
       expect(total + settlement.commission).toBe(0);
       for (const p of seats) expect(settlement.net[p]!).toBeGreaterThanOrEqual(-200);
+      for (const p of s.abandoned) {
+        if (!s.lateAbandoned.includes(p)) expect(settlement.paidBy[p]).toBe(100);
+      }
       expect(s.abandoned).not.toContain(s.result.winner);
       if (s.result.reason === "fifth_trick") {
         expect(s.tricks).toHaveLength(5);

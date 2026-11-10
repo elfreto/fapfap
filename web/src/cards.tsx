@@ -17,7 +17,7 @@ export function CardFace({
 }: {
   card: Card;
   size?: "sm" | "md" | "lg";
-  state?: "legal" | "illegal" | "selected" | "winner";
+  state?: "legal" | "illegal" | "selected" | "winner" | "current" | "won" | "old";
   onClick?: () => void;
   tag?: string;
 }) {

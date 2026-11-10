@@ -15,6 +15,7 @@ export class RuleError extends Error {
       | "not_your_turn"
       | "card_not_in_hand"
       | "must_follow_suit"
+      | "abandon_closed"
       | "invalid_setup",
     message: string,
   ) {
@@ -59,6 +60,8 @@ export interface RoundState {
   /** Cartes de départ, gardées pour l'écran de résultat des victoires spéciales. */
   dealtHands: Record<string, Card[]>;
   abandoned: string[];
+  /** Abandons survenus après le début du 3e pli (forcément par dépassement du délai). */
+  lateAbandoned: string[];
   tricks: Trick[];
   /** Joueur qui doit jouer, null quand la manche est finie. */
   turn: string | null;
@@ -124,6 +127,7 @@ export function startRound(input: { stake: number; players: readonly string[]; h
     hands,
     dealtHands: structuredClone(hands),
     abandoned: [],
+    lateAbandoned: [],
     tricks: [{ number: 1, leader: players[0]!, plays: [], ledSuit: null, winner: null, winningCard: null }],
     turn: players[0]!,
     result: null,
@@ -191,7 +195,16 @@ function finish(
     payout,
     winningCard,
     special,
-    settlement: settle({ stake: state.stake, players: state.players, winner, payout, abandoned: state.abandoned }),
+    settlement: settle({
+      stake: state.stake,
+      players: state.players,
+      winner,
+      payout,
+      abandoned: state.abandoned,
+      lateAbandoned: state.lateAbandoned,
+      // Un abandon tardif paie 2 × la mise si le vainqueur gagne par Korat ou reste seul en jeu.
+      lateDouble: payout === "korat" || reason === "last_standing",
+    }),
   };
 }
 
@@ -243,16 +256,57 @@ export function playCard(prev: RoundState, player: string, card: Card): RoundSta
   return state;
 }
 
-/** Abandon volontaire (bouton) : possible à tout moment de la manche, pour tout joueur encore en jeu. */
-export function abandon(prev: RoundState, player: string): RoundState {
-  assertInRound(prev, player);
+/**
+ * Le 3e pli a-t-il commencé (première carte du 3e pli posée) ?
+ * Avant ce moment, le bouton « Abandonner » est disponible ; ensuite seul le délai de 30 s fait abandonner.
+ */
+export function thirdTrickStarted(state: RoundState): boolean {
+  const trick = currentTrick(state);
+  return trick.number > 3 || (trick.number === 3 && trick.plays.length > 0);
+}
+
+/** Le joueur peut-il appuyer sur « Abandonner » maintenant ? */
+export function canAbandon(state: RoundState, player: string): boolean {
+  return !state.result && state.players.includes(player) && !state.abandoned.includes(player) && !thirdTrickStarted(state);
+}
+
+/**
+ * Qui mène quand le joueur qui devait mener abandonne :
+ * au 1er pli, le suivant dans le sens horaire ; ensuite, le joueur encore en jeu qui avait la plus
+ * haute carte de l'enseigne demandée au pli précédent (à défaut, le suivant dans le sens horaire).
+ */
+function replacementLeader(state: RoundState, quitter: string): string | null {
+  const trick = currentTrick(state);
+  const prev = state.tricks[trick.number - 2];
+  if (prev) {
+    const best = prev.plays
+      .filter((pl) => !state.abandoned.includes(pl.player) && pl.card.suit === prev.ledSuit)
+      .sort((a, b) => b.card.rank - a.card.rank)[0];
+    if (best) return best.player;
+  }
+  return nextToPlay(state, quitter);
+}
+
+function doAbandon(prev: RoundState, player: string): RoundState {
   const state = structuredClone(prev);
+  state.lateAbandoned ??= []; // états enregistrés avant cette règle
+  if (thirdTrickStarted(state)) state.lateAbandoned.push(player);
   state.abandoned.push(player);
   state.hands[player] = [];
   const trick = currentTrick(state);
   if (state.turn === player) {
-    // Si c'était à lui de mener, le suivant mène.
-    if (trick.plays.length === 0) trick.leader = nextToPlay(state, player) ?? trick.leader;
+    if (trick.plays.length === 0) {
+      // Il devait mener : la main passe selon la règle de remplacement.
+      const remaining = active(state);
+      if (remaining.length === 1) {
+        finish(state, remaining[0]!, "last_standing", "simple", null, null);
+        return state;
+      }
+      const leader = replacementLeader(state, player)!;
+      trick.leader = leader;
+      state.turn = leader;
+      return state;
+    }
     advance(state, player);
   } else {
     // Le joueur attendu n'a pas encore joué, donc le pli n'est pas complet et le tour ne change pas.
@@ -263,11 +317,20 @@ export function abandon(prev: RoundState, player: string): RoundState {
   return state;
 }
 
-/** 30 secondes écoulées sans jouer : le joueur attendu est considéré comme ayant abandonné. */
+/** Bouton « Abandonner » : possible pour tout joueur en jeu, de la distribution jusqu'à la première carte du 3e pli. */
+export function abandon(prev: RoundState, player: string): RoundState {
+  assertInRound(prev, player);
+  if (thirdTrickStarted(prev)) {
+    throw new RuleError("abandon_closed", "L'abandon n'est plus possible à partir du 3e pli");
+  }
+  return doAbandon(prev, player);
+}
+
+/** 30 secondes écoulées sans jouer : le joueur attendu est considéré comme ayant abandonné, à tout moment. */
 export function timeout(prev: RoundState, player: string): RoundState {
   assertInRound(prev, player);
   if (prev.turn !== player) throw new RuleError("not_your_turn", "Le délai ne concerne que le joueur attendu");
-  return abandon(prev, player);
+  return doAbandon(prev, player);
 }
 
 /** Joueur qui commence la manche suivante : celui à gauche (suivant horaire) du vainqueur, parmi les présents. */

@@ -101,14 +101,25 @@ export function Table({
   const myTurn = active && round!.turn === me.id;
   const inRound = !!round && round.players.some((p) => p.id === me.id);
   const iAbandoned = !!round?.players.find((p) => p.id === me.id)?.abandoned;
+  const stillPlaying = active && inRound && !iAbandoned;
+  const abandonOpen = stillPlaying && round!.abandonOpen !== false;
   const trick = round ? round.tricks[round.tricks.length - 1]! : null;
-  const allPlays = useMemo(() => (round ? round.tricks.flatMap((t) => t.plays.map((p) => ({ ...p, trick: t.number }))) : []), [round]);
   const isLegal = (c: Card) => legal.some((l) => sameCard(l, c));
   const name = (id: string) => (id === me.id ? "Vous" : table.names[id] ?? "?");
-
-  const seatsOrder = table.seats.length ? rotateFrom(table.seats, me.id) : [];
-  const others = seatsOrder.filter((id) => id !== me.id);
   const enoughToStart = table.seats.filter((id) => (table.balances[id] ?? 0) >= requiredBalance(table.stake)).length >= 2;
+  const [showResult, setShowResult] = useState(true);
+  const resultKey = round?.result ? `${table.roundNo}` : "";
+  useEffect(() => setShowResult(true), [resultKey]);
+
+  // Places autour de la table : moi en bas, puis les autres dans le sens horaire (gauche, haut, droite).
+  const sides = useMemo(() => seatLayout(table.seats, round?.players.map((p) => p.id) ?? [], me.id, table.capacity), [table.seats, round, me.id, table.capacity]);
+  const playsBy = useMemo(() => {
+    const m: Record<string, Array<{ card: Card; trick: number; won: boolean }>> = {};
+    for (const t of round?.tricks ?? []) {
+      for (const pl of t.plays) (m[pl.player] ??= []).push({ card: pl.card, trick: t.number, won: t.winner === pl.player });
+    }
+    return m;
+  }, [round]);
 
   async function share() {
     const url = `${location.origin}${location.pathname}?t=${code}`;
@@ -146,116 +157,129 @@ export function Table({
 
       {offline && <div className="banner warn">Connexion interrompue, reconnexion en cours…</div>}
 
-      <section className="opponents">
-        {others.map((id) => {
-          const rp = round?.players.find((p) => p.id === id);
-          const isTurn = active && round!.turn === id;
-          return (
-            <div key={id} className={`opp ${isTurn ? "turn" : ""} ${rp?.abandoned ? "out" : ""}`}>
-              <div className="opp-name">{table.names[id]}</div>
-              <div className="opp-meta">{fmt(table.balances[id] ?? 0)} cr.</div>
-              {rp && !rp.abandoned && !round!.result && <CardBack count={rp.cardsLeft} />}
-              {rp?.abandoned && <div className="tag">A abandonné</div>}
-              {!rp && active && <div className="tag">Attend la prochaine manche</div>}
-              {isTurn && remaining !== null && <div className="timer">{remaining} s</div>}
-            </div>
-          );
-        })}
-        {others.length === 0 && <div className="muted">En attente d'autres joueurs. Partagez le code {code}.</div>}
-      </section>
+      <div className="stage">
+        <div className="board-wrap">
+          <div className="board">
+            {sides.map(({ side, id }) => {
+              if (!id) {
+                return (
+                  <div key={side} className={`seat seat-${side}`}>
+                    <div className="plate empty">Place libre</div>
+                  </div>
+                );
+              }
+              const rp = round?.players.find((p) => p.id === id);
+              const isTurn = active && round!.turn === id;
+              const plays = playsBy[id] ?? [];
+              return (
+                <div key={side} className={`seat seat-${side} ${rp?.abandoned ? "out" : ""}`}>
+                  <div className={`plate ${isTurn ? "turn" : ""}`}>
+                    <span className="plate-name">{name(id)}</span>
+                    <span className="plate-meta">{fmt(table.balances[id] ?? 0)} cr.</span>
+                    {id !== me.id && rp && !rp.abandoned && !round!.result && <CardBack count={rp.cardsLeft} />}
+                    {rp?.abandoned && <span className="tag">Abandon</span>}
+                    {!rp && active && <span className="tag">Prochaine manche</span>}
+                    {isTurn && remaining !== null && <span className={`timer ${remaining <= 10 ? "hurry" : ""}`}>{remaining} s</span>}
+                  </div>
+                  <div className="played-cards">
+                    {plays.map((pl) => (
+                      <CardFace
+                        key={cardId(pl.card)}
+                        card={pl.card}
+                        size="sm"
+                        state={trick && pl.trick === trick.number && !round!.result ? "current" : pl.won ? "won" : "old"}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
 
-      <section className="felt">
-        {!round && (
-          <div className="center-msg">
-            <p>
-              {table.seats.length < 2 ? `Partagez le code ${code} pour inviter vos amis.` : "Tout le monde est prêt ?"}
-            </p>
-            <button type="button" className="btn primary" disabled={!enoughToStart} onClick={() => act("start")}>
-              Lancer la manche
-            </button>
-          </div>
-        )}
-
-        {active && trick && (
-          <>
-            <div className="trick-info">
-              Pli {trick.number}/5
-              {trick.ledSuit && (
+            <div className="board-center">
+              {!round && (
                 <>
-                  {" "}
-                  · Enseigne demandée : {SUIT_NAME[trick.ledSuit]} {SUIT_SYMBOL[trick.ledSuit]}
+                  <p className="small">
+                    {table.seats.length < 2 ? `Partagez le code ${code} pour inviter vos amis.` : "Tout le monde est prêt ?"}
+                  </p>
+                  <button type="button" className="btn primary small" disabled={!enoughToStart} onClick={() => act("start")}>
+                    Lancer la manche
+                  </button>
                 </>
               )}
-            </div>
-            <div className="trick">
-              {trick.plays.map((p) => (
-                <CardFace key={cardId(p.card)} card={p.card} size="lg" tag={name(p.player)} />
-              ))}
-              {trick.plays.length === 0 && <div className="muted">{name(round!.turn!)} mène le pli</div>}
-            </div>
-          </>
-        )}
-
-        {round && allPlays.length > 0 && (
-          <div className="played">
-            <div className="played-label">Cartes jouées</div>
-            <div className="played-strip">
-              {allPlays.map((p) => (
-                <CardFace key={cardId(p.card)} card={p.card} size="sm" tag={`${p.trick}`} />
-              ))}
+              {active && trick && (
+                <>
+                  <div className="center-trick">Pli {trick.number}/5</div>
+                  {trick.ledSuit ? (
+                    <div className={`center-suit ${trick.ledSuit === "zing" || trick.ledSuit === "koubi" ? "red" : ""}`} title="Enseigne demandée">
+                      {SUIT_SYMBOL[trick.ledSuit]}
+                      <span>{SUIT_NAME[trick.ledSuit]}</span>
+                    </div>
+                  ) : (
+                    <div className="small muted">{name(round!.turn!)} mène</div>
+                  )}
+                  {remaining !== null && <div className={`center-timer ${remaining <= 10 ? "hurry" : ""}`}>{remaining} s</div>}
+                </>
+              )}
+              {round?.result && !showResult && (
+                <button type="button" className="btn small primary" onClick={() => setShowResult(true)}>
+                  Voir le résultat
+                </button>
+              )}
             </div>
           </div>
-        )}
-
-        {round?.result && (
-          <Result view={view} name={name} onNext={() => act("start")} canNext={enoughToStart} />
-        )}
-      </section>
-
-      <section className="me">
-        <div className="me-status">
-          {active && myTurn && (
-            <span className="your-turn">
-              À vous de jouer {remaining !== null && <b className={remaining <= 10 ? "hurry" : ""}>{remaining} s</b>}
-            </span>
-          )}
-          {active && !myTurn && inRound && !iAbandoned && <span>Au tour de {name(round!.turn!)}</span>}
-          {iAbandoned && active && <span>Vous avez abandonné cette manche.</span>}
-          {active && !inRound && <span>Vous jouerez à la prochaine manche.</span>}
-          {active && inRound && !iAbandoned && (
-            <button type="button" className="btn small danger" onClick={() => setConfirm("abandon")}>
-              Abandon
-            </button>
-          )}
         </div>
-        <div className="hand">
-          {hand.map((c) => {
-            const id = cardId(c);
-            const legalCard = myTurn && isLegal(c);
-            const state = !myTurn ? undefined : selected === id ? "selected" : legalCard ? "legal" : "illegal";
-            return (
-              <CardFace
-                key={id}
-                card={c}
-                size="lg"
-                state={state}
-                onClick={
-                  legalCard
-                    ? () => {
-                        if (selected === id) {
-                          setSelected(null);
-                          void act("play", { card: id });
-                        } else setSelected(id);
-                      }
-                    : undefined
-                }
-              />
-            );
-          })}
+
+        <section className="me">
+          <div className="me-status">
+            {active && myTurn && (
+              <span className="your-turn">
+                À vous de jouer {remaining !== null && <b className={remaining <= 10 ? "hurry" : ""}>{remaining} s</b>}
+              </span>
+            )}
+            {stillPlaying && !myTurn && <span>Au tour de {name(round!.turn!)}</span>}
+            {iAbandoned && active && <span>Vous avez abandonné cette manche.</span>}
+            {active && !inRound && <span>Vous jouerez à la prochaine manche.</span>}
+            {abandonOpen && (
+              <button type="button" className="btn small danger" onClick={() => setConfirm("abandon")}>
+                Abandonner
+              </button>
+            )}
+          </div>
+          <div className="hand">
+            {hand.map((c) => {
+              const id = cardId(c);
+              const legalCard = myTurn && isLegal(c);
+              const state = !myTurn ? undefined : selected === id ? "selected" : legalCard ? "legal" : "illegal";
+              return (
+                <CardFace
+                  key={id}
+                  card={c}
+                  size="lg"
+                  state={state}
+                  onClick={
+                    legalCard
+                      ? () => {
+                          if (selected === id) {
+                            setSelected(null);
+                            void act("play", { card: id });
+                          } else setSelected(id);
+                        }
+                      : undefined
+                  }
+                />
+              );
+            })}
+          </div>
+          {myTurn && <p className="hint">Touchez une carte pour la choisir, puis touchez-la encore pour la jouer.</p>}
+          {error && <p className="error">{error}</p>}
+        </section>
+      </div>
+
+      {round?.result && showResult && (
+        <div className="modal" role="dialog">
+          <Result view={view} name={name} onNext={() => act("start")} canNext={enoughToStart} onHide={() => setShowResult(false)} />
         </div>
-        {myTurn && <p className="hint">Touchez une carte pour la choisir, puis touchez-la encore pour la jouer.</p>}
-        {error && <p className="error">{error}</p>}
-      </section>
+      )}
 
       {confirm && (
         <div className="modal" role="dialog">
@@ -265,28 +289,35 @@ export function Table({
                 <h2>Abandonner la manche ?</h2>
                 <p>Vous paierez {fmt(table.stake)} crédits au vainqueur et ne pourrez plus jouer cette manche.</p>
               </>
+            ) : stillPlaying && !abandonOpen ? (
+              <>
+                <h2>Impossible de quitter maintenant</h2>
+                <p>À partir du 3e pli, on ne peut plus abandonner : terminez la manche (sans jouer, vous abandonnez au bout de 30 s).</p>
+              </>
             ) : (
               <>
                 <h2>Quitter la table ?</h2>
-                <p>{active && inRound && !iAbandoned ? `Une manche est en cours : vous abandonnerez et paierez ${fmt(table.stake)} crédits.` : "Vous pourrez revenir avec le code de la table."}</p>
+                <p>{stillPlaying ? `Une manche est en cours : vous abandonnerez et paierez ${fmt(table.stake)} crédits.` : "Vous pourrez revenir avec le code de la table."}</p>
               </>
             )}
             <div className="row">
               <button type="button" className="btn ghost" onClick={() => setConfirm(null)}>
-                Annuler
+                {confirm === "leave" && stillPlaying && !abandonOpen ? "Compris" : "Annuler"}
               </button>
-              <button
-                type="button"
-                className="btn danger"
-                onClick={() => {
-                  const what = confirm;
-                  setConfirm(null);
-                  if (what === "abandon") void act("abandon");
-                  else onLeave();
-                }}
-              >
-                {confirm === "abandon" ? "Abandonner" : "Quitter"}
-              </button>
+              {!(confirm === "leave" && stillPlaying && !abandonOpen) && (
+                <button
+                  type="button"
+                  className="btn danger"
+                  onClick={() => {
+                    const what = confirm;
+                    setConfirm(null);
+                    if (what === "abandon") void act("abandon");
+                    else onLeave();
+                  }}
+                >
+                  {confirm === "abandon" ? "Abandonner" : "Quitter"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -294,6 +325,17 @@ export function Table({
       {showRules && <Rules onClose={() => setShowRules(false)} />}
     </main>
   );
+}
+
+type Side = "bottom" | "left" | "top" | "right";
+const LAYOUTS: Record<number, Side[]> = { 2: ["bottom", "top"], 3: ["bottom", "left", "right"], 4: ["bottom", "left", "top", "right"] };
+
+/** Associe chaque côté de la table à un joueur (sens horaire à partir de moi, en bas). */
+function seatLayout(seats: string[], roundPlayers: string[], me: string, capacity: number): Array<{ side: Side; id: string | null }> {
+  const all = [...seats, ...roundPlayers.filter((p) => !seats.includes(p))];
+  const order = rotateFrom(all, me);
+  const n = Math.min(4, Math.max(2, capacity, order.length));
+  return LAYOUTS[n]!.map((side, i) => ({ side, id: order[i] ?? null }));
 }
 
 function rotateFrom(list: string[], start: string): string[] {
@@ -306,11 +348,13 @@ function Result({
   name,
   onNext,
   canNext,
+  onHide,
 }: {
   view: TableView;
   name: (id: string) => string;
   onNext: () => void;
   canNext: boolean;
+  onHide: () => void;
 }) {
   const { table } = view;
   const res = table.round!.result!;
@@ -324,6 +368,9 @@ function Result({
         : `Gagne le 5e pli avec le ${cardLabel(res.winningCard!)}`;
   return (
     <div className="result">
+      <button type="button" className="btn small ghost result-hide" onClick={onHide}>
+        Voir la table
+      </button>
       <h2>
         {res.winner === view.me.id ? "Vous gagnez la manche !" : `${table.names[res.winner]} gagne la manche`}
       </h2>
