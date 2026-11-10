@@ -1,6 +1,6 @@
 {
   "installCommand": "npm ci",
-  "buildCommand": "npm run build -w web",
+  "buildCommand": "cd web && npm run build",
   "outputDirectory": "web/dist",
   "framework": null
 }
