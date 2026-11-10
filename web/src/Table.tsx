@@ -1,0 +1,384 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type Card, SPECIAL_RULES, cardId, requiredBalance, sameCard } from "@fapfap/engine";
+import { ApiError, type TableView, call, supabase } from "./api.ts";
+import { CardBack, CardFace, SUIT_NAME, SUIT_SYMBOL, cardLabel } from "./cards.tsx";
+import { Rules } from "./Rules.tsx";
+
+const fmt = (n: number) => n.toLocaleString("fr-FR");
+
+export function Table({
+  token,
+  view,
+  setView,
+  onLeave,
+}: {
+  token: string;
+  view: TableView;
+  setView: (v: TableView) => void;
+  onLeave: () => void;
+}) {
+  const { table, me, hand, legal } = view;
+  const round = table.round;
+  const code = table.id;
+  const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<null | "abandon" | "leave">(null);
+  const [showRules, setShowRules] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const [copied, setCopied] = useState(false);
+  const clockOffset = useRef(0);
+  const ticking = useRef(false);
+
+  useEffect(() => {
+    clockOffset.current = Date.parse(view.serverTime) - Date.now();
+  }, [view.serverTime]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const v = await call<TableView>("view", { token, code });
+      setView(v);
+      setOffline(false);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 0) setOffline(true);
+    }
+  }, [token, code, setView]);
+
+  // Temps réel : chaque changement de la table publique déclenche une relecture de ma vue.
+  useEffect(() => {
+    const channel = supabase
+      .channel(`table-${code}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "table_public", filter: `id=eq.${code}` }, () => {
+        void refresh();
+      })
+      .subscribe();
+    const poll = setInterval(refresh, 4000);
+    return () => {
+      clearInterval(poll);
+      void supabase.removeChannel(channel);
+    };
+  }, [code, refresh]);
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, []);
+
+  const act = useCallback(
+    async (action: string, params: Record<string, unknown> = {}) => {
+      setError(null);
+      try {
+        const v = await call<TableView>(action, { token, code, ...params });
+        setView(v);
+        setOffline(false);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 0) setOffline(true);
+        setError(e instanceof Error ? e.message : String(e));
+        void refresh();
+      }
+    },
+    [token, code, setView, refresh],
+  );
+
+  const active = !!round && !round.result;
+  const deadline = table.deadline ? Date.parse(table.deadline) : null;
+  const remaining = active && deadline ? Math.max(0, Math.ceil((deadline - (now + clockOffset.current)) / 1000)) : null;
+
+  // Délai dépassé : n'importe quel joueur demande au serveur d'appliquer l'abandon.
+  useEffect(() => {
+    if (!active || !deadline || ticking.current) return;
+    if (now + clockOffset.current > deadline + 2500) {
+      ticking.current = true;
+      void call<TableView>("tick", { token, code })
+        .then(setView)
+        .catch(() => undefined)
+        .finally(() => {
+          ticking.current = false;
+        });
+    }
+  }, [now, active, deadline, token, code, setView]);
+
+  const myTurn = active && round!.turn === me.id;
+  const inRound = !!round && round.players.some((p) => p.id === me.id);
+  const iAbandoned = !!round?.players.find((p) => p.id === me.id)?.abandoned;
+  const trick = round ? round.tricks[round.tricks.length - 1]! : null;
+  const allPlays = useMemo(() => (round ? round.tricks.flatMap((t) => t.plays.map((p) => ({ ...p, trick: t.number }))) : []), [round]);
+  const isLegal = (c: Card) => legal.some((l) => sameCard(l, c));
+  const name = (id: string) => (id === me.id ? "Vous" : table.names[id] ?? "?");
+
+  const seatsOrder = table.seats.length ? rotateFrom(table.seats, me.id) : [];
+  const others = seatsOrder.filter((id) => id !== me.id);
+  const enoughToStart = table.seats.filter((id) => (table.balances[id] ?? 0) >= requiredBalance(table.stake)).length >= 2;
+
+  async function share() {
+    const url = `${location.origin}${location.pathname}?t=${code}`;
+    try {
+      if (navigator.share) await navigator.share({ title: "FapFap", text: `Rejoins ma table FapFap (code ${code})`, url });
+      else {
+        await navigator.clipboard.writeText(url);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } catch {
+      /* partage annulé */
+    }
+  }
+
+  return (
+    <main className="screen table-screen">
+      <header className="topbar">
+        <div>
+          <b>Table {code}</b> · Mise {fmt(table.stake)} · {table.seats.length}/{table.capacity} joueurs
+        </div>
+        <div className="topbar-actions">
+          <span className="chip">{fmt(table.balances[me.id] ?? me.balance)} crédits</span>
+          <button type="button" className="btn small" onClick={share}>
+            {copied ? "Lien copié" : "Inviter"}
+          </button>
+          <button type="button" className="btn small ghost" onClick={() => setShowRules(true)}>
+            Règles
+          </button>
+          <button type="button" className="btn small ghost" onClick={() => setConfirm("leave")}>
+            Quitter
+          </button>
+        </div>
+      </header>
+
+      {offline && <div className="banner warn">Connexion interrompue, reconnexion en cours…</div>}
+
+      <section className="opponents">
+        {others.map((id) => {
+          const rp = round?.players.find((p) => p.id === id);
+          const isTurn = active && round!.turn === id;
+          return (
+            <div key={id} className={`opp ${isTurn ? "turn" : ""} ${rp?.abandoned ? "out" : ""}`}>
+              <div className="opp-name">{table.names[id]}</div>
+              <div className="opp-meta">{fmt(table.balances[id] ?? 0)} cr.</div>
+              {rp && !rp.abandoned && !round!.result && <CardBack count={rp.cardsLeft} />}
+              {rp?.abandoned && <div className="tag">A abandonné</div>}
+              {!rp && active && <div className="tag">Attend la prochaine manche</div>}
+              {isTurn && remaining !== null && <div className="timer">{remaining} s</div>}
+            </div>
+          );
+        })}
+        {others.length === 0 && <div className="muted">En attente d'autres joueurs. Partagez le code {code}.</div>}
+      </section>
+
+      <section className="felt">
+        {!round && (
+          <div className="center-msg">
+            <p>
+              {table.seats.length < 2 ? `Partagez le code ${code} pour inviter vos amis.` : "Tout le monde est prêt ?"}
+            </p>
+            <button type="button" className="btn primary" disabled={!enoughToStart} onClick={() => act("start")}>
+              Lancer la manche
+            </button>
+          </div>
+        )}
+
+        {active && trick && (
+          <>
+            <div className="trick-info">
+              Pli {trick.number}/5
+              {trick.ledSuit && (
+                <>
+                  {" "}
+                  · Enseigne demandée : {SUIT_NAME[trick.ledSuit]} {SUIT_SYMBOL[trick.ledSuit]}
+                </>
+              )}
+            </div>
+            <div className="trick">
+              {trick.plays.map((p) => (
+                <CardFace key={cardId(p.card)} card={p.card} size="lg" tag={name(p.player)} />
+              ))}
+              {trick.plays.length === 0 && <div className="muted">{name(round!.turn!)} mène le pli</div>}
+            </div>
+          </>
+        )}
+
+        {round && allPlays.length > 0 && (
+          <div className="played">
+            <div className="played-label">Cartes jouées</div>
+            <div className="played-strip">
+              {allPlays.map((p) => (
+                <CardFace key={cardId(p.card)} card={p.card} size="sm" tag={`${p.trick}`} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {round?.result && (
+          <Result view={view} name={name} onNext={() => act("start")} canNext={enoughToStart} />
+        )}
+      </section>
+
+      <section className="me">
+        <div className="me-status">
+          {active && myTurn && (
+            <span className="your-turn">
+              À vous de jouer {remaining !== null && <b className={remaining <= 10 ? "hurry" : ""}>{remaining} s</b>}
+            </span>
+          )}
+          {active && !myTurn && inRound && !iAbandoned && <span>Au tour de {name(round!.turn!)}</span>}
+          {iAbandoned && active && <span>Vous avez abandonné cette manche.</span>}
+          {active && !inRound && <span>Vous jouerez à la prochaine manche.</span>}
+          {active && inRound && !iAbandoned && (
+            <button type="button" className="btn small danger" onClick={() => setConfirm("abandon")}>
+              Abandon
+            </button>
+          )}
+        </div>
+        <div className="hand">
+          {hand.map((c) => {
+            const id = cardId(c);
+            const legalCard = myTurn && isLegal(c);
+            const state = !myTurn ? undefined : selected === id ? "selected" : legalCard ? "legal" : "illegal";
+            return (
+              <CardFace
+                key={id}
+                card={c}
+                size="lg"
+                state={state}
+                onClick={
+                  legalCard
+                    ? () => {
+                        if (selected === id) {
+                          setSelected(null);
+                          void act("play", { card: id });
+                        } else setSelected(id);
+                      }
+                    : undefined
+                }
+              />
+            );
+          })}
+        </div>
+        {myTurn && <p className="hint">Touchez une carte pour la choisir, puis touchez-la encore pour la jouer.</p>}
+        {error && <p className="error">{error}</p>}
+      </section>
+
+      {confirm && (
+        <div className="modal" role="dialog">
+          <div className="modal-box">
+            {confirm === "abandon" ? (
+              <>
+                <h2>Abandonner la manche ?</h2>
+                <p>Vous paierez {fmt(table.stake)} crédits au vainqueur et ne pourrez plus jouer cette manche.</p>
+              </>
+            ) : (
+              <>
+                <h2>Quitter la table ?</h2>
+                <p>{active && inRound && !iAbandoned ? `Une manche est en cours : vous abandonnerez et paierez ${fmt(table.stake)} crédits.` : "Vous pourrez revenir avec le code de la table."}</p>
+              </>
+            )}
+            <div className="row">
+              <button type="button" className="btn ghost" onClick={() => setConfirm(null)}>
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="btn danger"
+                onClick={() => {
+                  const what = confirm;
+                  setConfirm(null);
+                  if (what === "abandon") void act("abandon");
+                  else onLeave();
+                }}
+              >
+                {confirm === "abandon" ? "Abandonner" : "Quitter"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showRules && <Rules onClose={() => setShowRules(false)} />}
+    </main>
+  );
+}
+
+function rotateFrom(list: string[], start: string): string[] {
+  const i = list.indexOf(start);
+  return i < 0 ? list : [...list.slice(i), ...list.slice(0, i)];
+}
+
+function Result({
+  view,
+  name,
+  onNext,
+  canNext,
+}: {
+  view: TableView;
+  name: (id: string) => string;
+  onNext: () => void;
+  canNext: boolean;
+}) {
+  const { table } = view;
+  const res = table.round!.result!;
+  const s = res.settlement;
+  const special = res.special ? SPECIAL_RULES.find((r) => r.kind === res.special!.special.kind) : null;
+  const how =
+    res.reason === "special"
+      ? `Victoire spéciale : ${special?.label ?? ""}`
+      : res.reason === "last_standing"
+        ? "Tous les autres joueurs ont abandonné"
+        : `Gagne le 5e pli avec le ${cardLabel(res.winningCard!)}`;
+  return (
+    <div className="result">
+      <h2>
+        {res.winner === view.me.id ? "Vous gagnez la manche !" : `${table.names[res.winner]} gagne la manche`}
+      </h2>
+      <p>
+        {how}
+        {res.payout === "korat" && <b className="korat"> · Korat</b>}
+      </p>
+      {res.reason === "special" && (
+        <div className="all-hands">
+          {table.round!.players.map((p) => (
+            <div key={p.id} className={`all-hand ${p.id === res.winner ? "win" : ""}`}>
+              <div>
+                {name(p.id)} {p.id === res.winner && <span className="tag gold">Gagnant</span>}
+              </div>
+              <div className="row tight">
+                {(p.dealtHand ?? []).map((c) => (
+                  <CardFace key={cardId(c)} card={c} size="sm" />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <table className="payments">
+        <thead>
+          <tr>
+            <th>Joueur</th>
+            <th>Résultat</th>
+            <th>Nouveau solde</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(s.net).map(([id, net]) => (
+            <tr key={id}>
+              <td>
+                {name(id)}
+                {table.round!.players.find((p) => p.id === id)?.abandoned ? " (abandon)" : ""}
+              </td>
+              <td className={net >= 0 ? "pos" : "neg"}>
+                {net >= 0 ? "+" : ""}
+                {fmt(net)}
+              </td>
+              <td>{fmt(table.balances[id] ?? 0)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="muted small">
+        Gain {fmt(s.gain)} − contribution du croupier 10 % ({fmt(s.commission)}).
+        {table.nextFirstPlayer && ` Prochaine manche : ${name(table.nextFirstPlayer)} commence.`}
+      </p>
+      <button type="button" className="btn primary" disabled={!canNext} onClick={onNext}>
+        Manche suivante
+      </button>
+      {!canNext && <p className="muted small">Il faut au moins 2 joueurs avec 2 × la mise.</p>}
+    </div>
+  );
+}
