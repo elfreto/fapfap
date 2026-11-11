@@ -2,6 +2,14 @@ import type { Card, Suit } from "@fapfap/engine";
 
 export const SUIT_SYMBOL: Record<Suit, string> = { tchaka: "♣", zing: "♦", koubi: "♥", black: "♠" };
 export const SUIT_NAME: Record<Suit, string> = { tchaka: "Tchaka", zing: "Zing", koubi: "Koubi", black: "Black" };
+/** Ordre des enseignes dans la main d'un joueur (décision LeCerf). */
+const HAND_SUIT_ORDER: Suit[] = ["black", "zing", "tchaka", "koubi"];
+
+/** Main triée : cartes de même enseigne côte à côte (black, zing, tchaka, koubi), valeurs croissantes. */
+export function sortHand(cards: readonly Card[]): Card[] {
+  return [...cards].sort((a, b) => HAND_SUIT_ORDER.indexOf(a.suit) - HAND_SUIT_ORDER.indexOf(b.suit) || a.rank - b.rank);
+}
+
 const RED: Suit[] = ["zing", "koubi"];
 
 export function cardLabel(c: Card): string {
