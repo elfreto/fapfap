@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Card, SPECIAL_RULES, cardId, requiredBalance, sameCard } from "@fapfap/engine";
 import { ApiError, type TableView, call, supabase } from "./api.ts";
-import { CardFace, SUIT_NAME, SUIT_SYMBOL, cardLabel } from "./cards.tsx";
+import { CardFace, sortHand, SUIT_NAME, SUIT_SYMBOL, cardLabel } from "./cards.tsx";
 import { Rules } from "./Rules.tsx";
 
 const fmt = (n: number) => n.toLocaleString("fr-FR");
@@ -17,7 +17,8 @@ export function Table({
   setView: (v: TableView) => void;
   onLeave: () => void;
 }) {
-  const { table, me, hand, legal } = view;
+  const { table, me, legal } = view;
+  const hand = useMemo(() => sortHand(view.hand), [view.hand]);
   const round = table.round;
   const code = table.id;
   const [error, setError] = useState<string | null>(null);
@@ -473,7 +474,7 @@ function Result({
                 {name(p.id)} {p.id === res.winner && <span className="tag gold">Gagnant</span>}
               </div>
               <div className="row tight">
-                {(p.dealtHand ?? []).map((c) => (
+                {sortHand(p.dealtHand ?? []).map((c) => (
                   <CardFace key={cardId(c)} card={c} size="sm" />
                 ))}
               </div>
