@@ -53,40 +53,20 @@ export function CardBack({ count }: { count: number }) {
   );
 }
 
-/** Positions des symboles (carte de 100 × 140), comme sur un jeu classique. */
-const L = 35, R = 65, C = 50;
-const PIPS: Record<number, Array<[number, number]>> = {
-  3: [[C, 24], [C, 70], [C, 116]],
-  4: [[L, 24], [R, 24], [L, 116], [R, 116]],
-  5: [[L, 24], [R, 24], [C, 70], [L, 116], [R, 116]],
-  6: [[L, 24], [R, 24], [L, 70], [R, 70], [L, 116], [R, 116]],
-  7: [[L, 24], [R, 24], [C, 47], [L, 70], [R, 70], [L, 116], [R, 116]],
-  8: [[L, 24], [R, 24], [C, 47], [L, 70], [R, 70], [C, 93], [L, 116], [R, 116]],
-  9: [[L, 24], [R, 24], [L, 55], [R, 55], [C, 70], [L, 85], [R, 85], [L, 116], [R, 116]],
-  10: [[L, 24], [R, 24], [C, 39], [L, 55], [R, 55], [L, 85], [R, 85], [C, 101], [L, 116], [R, 116]],
-};
-
+/** Carte au modèle simple : grande valeur et petite enseigne en haut à gauche, grand symbole en bas à droite. */
 function CardSvg({ card }: { card: Card }) {
   const sym = SUIT_SYMBOL[card.suit];
-  const corner = (
-    <g>
-      <text x="12" y="21" className="cs-rank" textAnchor="middle" letterSpacing={card.rank === 10 ? -2 : undefined}>
-        {card.rank}
-      </text>
-      <text x="12" y="37" className="cs-suit" textAnchor="middle">
-        {sym}
-      </text>
-    </g>
-  );
   return (
     <svg className="card-svg" viewBox="0 0 100 140" aria-hidden="true">
-      {corner}
-      <g transform="rotate(180 50 70)">{corner}</g>
-      {PIPS[card.rank]!.map(([x, y], i) => (
-        <text key={i} x={x} y={y} className="cs-pip" textAnchor="middle" dominantBaseline="central" transform={y > 70 ? `rotate(180 ${x} ${y})` : undefined}>
-          {sym}
-        </text>
-      ))}
+      <text x="9" y="36" className="cs-rank" letterSpacing={card.rank === 10 ? -3 : undefined}>
+        {card.rank}
+      </text>
+      <text x="21" y="60" className="cs-suit" textAnchor="middle">
+        {sym}
+      </text>
+      <text x="64" y="126" className="cs-big" textAnchor="middle">
+        {sym}
+      </text>
     </svg>
   );
 }
