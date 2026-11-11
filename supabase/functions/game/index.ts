@@ -14,7 +14,7 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-/** Marge accordée au-delà des 30 s pour la latence réseau. */
+/** Marge accordée au-delà du délai de jeu pour la latence réseau. */
 const GRACE_MS = 2000;
 
 class HttpError extends Error {
@@ -163,7 +163,7 @@ function afterRound(t: TableRow, round: E.RoundState): { change: Change; ledger:
   if (!round.result) {
     const prevTurn = t.state.round?.turn;
     const keep = prevTurn === round.turn && t.state.round?.tricks.length === round.tricks.length && t.state.deadline;
-    // Nouveau délai de 30 s dès que le joueur attendu change.
+    // Nouveau délai de jeu dès que le joueur attendu change.
     return { change: { state: { round, deadline: keep ? t.state.deadline : deadlineIn() } }, ledger: [] };
   }
   const s = round.result.settlement;
@@ -199,7 +199,7 @@ async function leaveCurrent(player: Player) {
   let extra: ReturnType<typeof afterRound> | null = null;
   if (round && !round.result && round.players.includes(player.id) && !round.abandoned.includes(player.id)) {
     if (!E.canAbandon(round, player.id)) {
-      throw new HttpError(400, "À partir du 3e pli, on ne peut plus quitter la manche : seul le délai de 30 s fait abandonner");
+      throw new HttpError(400, "À partir du 3e pli, on ne peut plus quitter la manche : seul le délai de 60 s fait abandonner");
     }
     round = E.abandon(round, player.id);
   }

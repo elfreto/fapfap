@@ -16,11 +16,12 @@ export function Rules({ onClose }: { onClose: () => void }) {
         <h3>La manche</h3>
         <ul>
           <li>Chaque joueur reçoit 5 cartes (3 puis 2) et joue une carte par pli, 5 plis en tout.</li>
+          <li>On joue dans le sens inverse des aiguilles d'une montre : après vous, c'est au joueur à votre droite.</li>
           <li>Le meneur pose la carte de son choix : son enseigne est l'enseigne demandée.</li>
           <li>Si vous avez l'enseigne demandée, vous devez la jouer. Sinon, jouez n'importe quelle carte.</li>
           <li>La plus forte carte de l'enseigne demandée gagne le pli, et son joueur mène le pli suivant.</li>
-          <li>Le gagnant du 5e pli gagne la manche. La manche suivante commence par le joueur à sa gauche.</li>
-          <li>Vous avez 30 secondes pour jouer, sinon vous êtes considéré comme ayant abandonné.</li>
+          <li>Le gagnant du 5e pli gagne la manche. La manche suivante commence par le joueur à sa droite.</li>
+          <li>Vous avez 60 secondes pour jouer, sinon vous êtes considéré comme ayant abandonné.</li>
         </ul>
         <h3>Gains</h3>
         <ul>
@@ -44,10 +45,10 @@ export function Rules({ onClose }: { onClose: () => void }) {
         <ul>
           <li>
             Le bouton « Abandonner » est disponible après la distribution, jusqu'à ce que le vainqueur du 2e pli joue la
-            première carte du 3e pli. Ensuite il disparaît : seul le délai de 30 s fait abandonner.
+            première carte du 3e pli. Ensuite il disparaît : seul le délai de 60 s fait abandonner.
           </li>
           <li>Abandon avant le 3e pli : vous payez 1 × la mise au vainqueur, même s'il gagne par Korat.</li>
-          <li>Abandon à partir du 3e pli (30 s écoulées) : 1 × la mise, ou 2 × si le vainqueur gagne par Korat.</li>
+          <li>Abandon à partir du 3e pli (60 s écoulées) : 1 × la mise, ou 2 × si le vainqueur gagne par Korat.</li>
           <li>Vos cartes restantes sont retirées ; celles déjà posées restent visibles mais ne peuvent plus gagner.</li>
           <li>
             Si vous deviez mener, la main passe au joueur qui avait la plus haute carte de l'enseigne demandée au pli
