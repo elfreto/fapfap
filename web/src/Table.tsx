@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type Card, SPECIAL_RULES, cardId, requiredBalance, sameCard } from "@fapfap/engine";
+import { type Card, SPECIAL_RULES, cardId, requiredBalance, sameCard, tableAmounts } from "@fapfap/engine";
 import { ApiError, type TableView, call, supabase } from "./api.ts";
-import { CardFace, sortHand, SUIT_NAME, SUIT_SYMBOL, cardLabel } from "./cards.tsx";
+import { Avatar, type AvatarChoice, AvatarPicker } from "./Avatar.tsx";
+import { CardFace, sortHand, cardLabel } from "./cards.tsx";
 import { Rules } from "./Rules.tsx";
 
 const fmt = (n: number) => n.toLocaleString("fr-FR");
@@ -29,6 +30,7 @@ export function Table({
   const [now, setNow] = useState(Date.now());
   const [copied, setCopied] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [picker, setPicker] = useState(false);
   const clockOffset = useRef(0);
   const ticking = useRef(false);
 
@@ -107,7 +109,7 @@ export function Table({
   const abandonOpen = stillPlaying && round!.abandonOpen !== false;
   const trick = round ? round.tricks[round.tricks.length - 1]! : null;
   const isLegal = (c: Card) => legal.some((l) => sameCard(l, c));
-  const name = (id: string) => (id === me.id ? "Vous" : table.names[id] ?? "?");
+  const name = (id: string) => table.names[id] ?? "?";
   const enoughToStart = table.seats.filter((id) => (table.balances[id] ?? 0) >= requiredBalance(table.stake)).length >= 2;
   const [showResult, setShowResult] = useState(true);
   const resultKey = round?.result ? `${table.roundNo}` : "";
@@ -147,13 +149,15 @@ export function Table({
       void act("play", { card: selected });
     } else if (canStart) void act("start");
   }
-  const status = !round
-    ? table.seats.length < 2
-      ? "En attente de joueurs"
-      : "Prêts à jouer"
-    : ended
-      ? "Manche terminée"
-      : null;
+  // Sommes de la manche en cours : pot et caisse Korat (1 × la mise de chaque joueur chacun).
+  const amounts = tableAmounts(table.stake, active ? round!.players.length : 0);
+  const myBalance = table.balances[me.id] ?? me.balance;
+  const available = active && inRound ? Math.max(0, myBalance - amounts.lockedPerPlayer) : myBalance;
+
+  async function saveAvatar(choice: AvatarChoice) {
+    await call("avatar", { token, ...choice });
+    await refresh();
+  }
 
   return (
     <main className="game">
@@ -163,18 +167,23 @@ export function Table({
         </button>
       </div>
       <div className="hud hud-right">
-        <div className="hud-info">
+        <dl className="hud-info">
           <div>
-            Table {code} · Mise {fmt(table.stake)}
+            <dt>Caisse Korat</dt>
+            <dd>{fmt(amounts.koratFund)}</dd>
           </div>
           <div>
-            {status ?? (
-              <>
-                Tour : <b>{name(round!.turn!)}</b>
-              </>
-            )}
+            <dt>Mise</dt>
+            <dd>{fmt(table.stake)}</dd>
           </div>
-        </div>
+          <div>
+            <dt>Solde disponible</dt>
+            <dd>
+              <span className="coin" />
+              {fmt(available)}
+            </dd>
+          </div>
+        </dl>
       </div>
 
       {offline && <div className="banner warn">Connexion interrompue, reconnexion en cours…</div>}
@@ -203,15 +212,14 @@ export function Table({
             )}
             {active && trick && (
               <>
+                <div className="pot">
+                  <span className="pot-label">Pot</span>
+                  <span className="pot-value">
+                    <span className="coin" />
+                    {fmt(amounts.pot)}
+                  </span>
+                </div>
                 <div className="center-trick">Pli {trick.number}/5</div>
-                {trick.ledSuit ? (
-                  <div className={`center-suit ${trick.ledSuit === "zing" || trick.ledSuit === "koubi" ? "red" : ""}`} title="Enseigne demandée">
-                    {SUIT_SYMBOL[trick.ledSuit]}
-                    <span>{SUIT_NAME[trick.ledSuit]}</span>
-                  </div>
-                ) : (
-                  <div className="center-lead">{name(round!.turn!)} mène</div>
-                )}
               </>
             )}
             {ended && !showResult && (
@@ -228,17 +236,9 @@ export function Table({
             return (
               <div key={side} className={`seat seat-${side} ${rp?.abandoned ? "out" : ""}`}>
                 <div className={`badge ${isTurn ? "turn" : ""} ${id ? "" : "empty"}`}>
-                  <div className="avatar" style={id ? { background: avatarColor(id) } : undefined}>
-                    {id ? initials(table.names[id] ?? "?") : "?"}
-                  </div>
+                  {id ? <Avatar id={id} name={name(id)} avatar={table.avatars?.[id] ?? (id === me.id ? me.avatar : null)} /> : <div className="avatar">?</div>}
                   <div className="pill">
                     <span className="pname">{id ? name(id) : "Place libre"}</span>
-                    {id && (
-                      <span className="pcoins">
-                        <span className="coin" />
-                        {fmt(table.balances[id] ?? 0)}
-                      </span>
-                    )}
                     {rp?.abandoned && <span className="ptag">Abandon</span>}
                     {id && !rp && active && <span className="ptag">Prochaine manche</span>}
                     {isTurn && remaining !== null && <span className={`ptimer ${remaining <= 10 ? "hurry" : ""}`}>{remaining} s</span>}
@@ -341,6 +341,16 @@ export function Table({
               className="btn"
               onClick={() => {
                 setMenu(false);
+                setPicker(true);
+              }}
+            >
+              Changer d'avatar
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setMenu(false);
                 setShowRules(true);
               }}
             >
@@ -410,6 +420,7 @@ export function Table({
           </div>
         </div>
       )}
+      {picker && <AvatarPicker me={{ ...me, avatar: table.avatars?.[me.id] ?? me.avatar }} onSave={saveAvatar} onClose={() => setPicker(false)} />}
       {showRules && <Rules onClose={() => setShowRules(false)} />}
     </main>
   );
@@ -516,16 +527,4 @@ function Result({
       {!canNext && <p className="muted small">Il faut au moins 2 joueurs avec 2 × la mise.</p>}
     </div>
   );
-}
-
-const AVATAR_COLORS = ["#e2553f", "#2f80ed", "#27ae60", "#9b51e0", "#f2994a", "#16a5a5", "#d6336c"];
-function avatarColor(id: string): string {
-  let h = 0;
-  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return AVATAR_COLORS[h % AVATAR_COLORS.length]!;
-}
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const s = parts.length > 1 ? parts[0]![0]! + parts[1]![0]! : (parts[0] ?? "?").slice(0, 2);
-  return s.toUpperCase();
 }

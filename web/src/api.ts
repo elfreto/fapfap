@@ -12,6 +12,7 @@ export interface Me {
   pseudo: string;
   balance: number;
   table_id?: string | null;
+  avatar?: string | null;
 }
 
 export interface PublicRound {
@@ -34,6 +35,7 @@ export interface PublicTable {
   deadline: string | null;
   names: Record<string, string>;
   balances: Record<string, number>;
+  avatars?: Record<string, string | null>;
   round: PublicRound | null;
 }
 

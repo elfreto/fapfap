@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { STAKES, STARTING_CREDITS, requiredBalance } from "@fapfap/engine";
 import { ApiError, type Me, type TableView, call, loadToken, saveToken } from "./api.ts";
+import { Avatar, type AvatarChoice, AvatarPicker } from "./Avatar.tsx";
 import { Rules } from "./Rules.tsx";
 import { Table } from "./Table.tsx";
 
@@ -118,6 +119,10 @@ export function App() {
           setInvite(v.table.id);
         })
       }
+      onAvatar={async (choice) => {
+        const r = await call<{ me: Me }>("avatar", { token, ...choice });
+        setMe(r.me);
+      }}
       onReload={() =>
         run(async () => {
           const r = await call<{ me: Me }>("reload", { token });
@@ -174,9 +179,11 @@ function Home(props: {
   onCreate: (stake: number, capacity: number) => void;
   onJoin: (code: string) => void;
   onReload: () => void;
+  onAvatar: (choice: AvatarChoice) => Promise<void>;
   onRules: () => void;
   rules: React.ReactNode;
 }) {
+  const [picker, setPicker] = useState(false);
   const [stake, setStake] = useState(100);
   const [capacity, setCapacity] = useState(4);
   const [code, setCode] = useState("");
@@ -187,9 +194,15 @@ function Home(props: {
         <h1 className="logo">
           FapFap <span>♣♦♥♠</span>
         </h1>
-        <p>
-          Bonjour <b>{me.pseudo}</b>
-        </p>
+        <div className="profile">
+          <button type="button" className="profile-avatar" onClick={() => setPicker(true)} aria-label="Changer d'avatar">
+            <Avatar id={me.id} name={me.pseudo} avatar={me.avatar} className="avatar-mini" />
+            <span className="profile-edit">✎</span>
+          </button>
+          <p>
+            Bonjour <b>{me.pseudo}</b>
+          </p>
+        </div>
         <p className="balance">
           {me.balance.toLocaleString("fr-FR")} <small>crédits virtuels</small>
         </p>
@@ -242,6 +255,7 @@ function Home(props: {
           Règles du jeu
         </button>
       </div>
+      {picker && <AvatarPicker me={me} onSave={props.onAvatar} onClose={() => setPicker(false)} />}
       {props.rules}
     </main>
   );

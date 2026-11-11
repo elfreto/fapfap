@@ -72,8 +72,11 @@ input, select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 
 .burger::before, .burger::after { content: ""; position: absolute; left: 0; }
 .burger::before { top: -7px; }
 .burger::after { top: 7px; }
-.hud-info { background: linear-gradient(#1f2766, #0f1440); border: 2px solid #5865c8; border-radius: 12px; padding: 5px 12px; font-size: 0.82rem; font-weight: 600; text-align: right; box-shadow: 0 4px 10px #0008; }
-.hud-info b { color: var(--gold); }
+.hud-info { margin: 0; background: linear-gradient(#1f2766, #0f1440); border: 2px solid #5865c8; border-radius: 12px; padding: 5px 12px; font-size: 0.8rem; box-shadow: 0 4px 10px #0008; display: grid; gap: 1px; }
+.hud-info > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.hud-info dt { color: #c5cbf5; font-weight: 600; }
+.hud-info dd { margin: 0; font-weight: 800; color: var(--gold); display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.hud-info .coin { width: 0.85em; height: 0.85em; box-shadow: 0 0 0 1px #a86f06; }
 
 .arena { grid-area: arena; min-height: 0; container-type: size; display: grid; place-items: center; }
 .board {
@@ -95,10 +98,10 @@ input, select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 
 .center-info { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); width: 30cqw; display: grid; gap: 1.2cqw; justify-items: center; text-align: center; font-size: clamp(0.62rem, 3.2cqw, 1rem); z-index: 2; text-shadow: 0 1px 2px #0008; }
 .center-info p { margin: 0; }
 .center-trick { font-weight: 800; letter-spacing: 0.03em; }
-.center-lead { font-weight: 600; }
-.center-suit { display: grid; justify-items: center; font-size: 4.5cqw; line-height: 1; color: var(--black); background: #fff; border-radius: 1cqw; padding: 0.5cqw 1.3cqw 0.4cqw; box-shadow: 0 2px 6px #0006; text-shadow: none; }
-.center-suit.red { color: var(--red); }
-.center-suit span { font-size: 1.3cqw; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.center-trick { font-size: 0.85em; opacity: 0.85; }
+.pot { display: grid; justify-items: center; gap: 0.4cqw; background: linear-gradient(#222a6b, #0f1442); border: 0.45cqw solid var(--gold); border-radius: 2.5cqw; padding: 1cqw 3cqw 1.2cqw; box-shadow: 0 0.6cqw 1.5cqw #0009; }
+.pot-label { font-size: 2.4cqw; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: #c5cbf5; }
+.pot-value { display: inline-flex; align-items: center; gap: 1.2cqw; font-size: 5cqw; font-weight: 900; color: var(--gold); line-height: 1; font-variant-numeric: tabular-nums; }
 
 /* Joueurs : chaque élément est placé par rapport à la table */
 .seat { display: contents; }
@@ -106,8 +109,10 @@ input, select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 
 .badge { display: flex; align-items: center; z-index: 4; }
 .avatar { position: relative; z-index: 1; flex: none; width: 12cqw; height: 12cqw; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 4.4cqw; border: 0.8cqw solid #f7c948; box-shadow: 0 0.6cqw 1.5cqw #0009, inset 0 -1cqw 2cqw #0004; background: #555; text-shadow: 0 1px 2px #0007; }
 .pill { display: flex; flex-direction: column; justify-content: center; gap: 0.3cqw; background: linear-gradient(#222a6b, #0f1442); border: 0.4cqw solid #4a57b5; border-radius: 3cqw; color: #fff; font-size: clamp(0.55rem, 3cqw, 0.95rem); white-space: nowrap; box-shadow: 0 0.6cqw 1.5cqw #0009; }
+.avatar.preset span { font-size: 6.5cqw; line-height: 1; text-shadow: none; }
+.avatar.photo { overflow: hidden; background: #222; }
+.avatar img, .avatar-mini img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
 .pname { font-weight: 700; }
-.pcoins { display: inline-flex; align-items: center; gap: 1cqw; color: var(--gold); font-weight: 800; }
 .coin { width: 3cqw; height: 3cqw; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff2a8, #f5b81c 55%, #c98a0a); box-shadow: 0 0 0 0.25cqw #a86f06; flex: none; }
 .ptag { font-size: 0.8em; color: #ffd2cc; }
 .ptimer { font-weight: 800; color: var(--gold); }
@@ -230,3 +235,16 @@ button.card { cursor: pointer; }
   .act { padding: 9px 6px; font-size: 0.85rem; }
   .msg-line { font-size: 0.8rem; min-height: 18px; padding: 2px 0; }
 }
+
+/* Avatars : choix dans l'accueil et dans Options */
+.avatar-mini { width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 1.2rem; border: 3px solid #f7c948; overflow: hidden; flex: none; text-shadow: 0 1px 2px #0007; }
+.avatar-mini.preset span { font-size: 1.9rem; line-height: 1; text-shadow: none; }
+.modal-box.avatar-picker { width: min(380px, 100%); }
+.avatar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.avatar-opt { display: grid; justify-items: center; gap: 2px; background: none; border: 2px solid transparent; border-radius: 12px; padding: 4px; color: inherit; font-size: 0.7rem; cursor: pointer; }
+.avatar-opt.on { border-color: var(--gold); background: #ffffff14; }
+.avatar-opt:disabled { opacity: 0.6; }
+.profile { display: flex; align-items: center; gap: 12px; }
+.profile p { margin: 0; }
+.profile-avatar { position: relative; background: none; border: 0; padding: 0; cursor: pointer; }
+.profile-edit { position: absolute; right: -4px; bottom: -4px; width: 22px; height: 22px; border-radius: 50%; background: #2c3794; border: 2px solid #f7c948; color: #fff; font-size: 0.7rem; display: grid; place-items: center; }

@@ -17,6 +17,8 @@ const CORS = {
 /** Marge accordée au-delà du délai de jeu pour la latence réseau. */
 const GRACE_MS = 2000;
 
+const PLAYER_COLS = "id, pseudo, balance, table_id, avatar";
+
 class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -28,6 +30,7 @@ interface Player {
   pseudo: string;
   balance: number;
   table_id: string | null;
+  avatar: string | null;
 }
 
 interface TableRow {
@@ -66,7 +69,7 @@ async function auth(token: unknown): Promise<Player> {
   if (typeof token !== "string" || token.length < 32) throw new HttpError(401, "Session invalide, reconnectez-vous");
   const { data, error } = await db
     .from("players")
-    .select("id, pseudo, balance, table_id")
+    .select(PLAYER_COLS)
     .eq("token_hash", await sha256(token))
     .maybeSingle();
   if (error) throw error;
@@ -84,7 +87,7 @@ async function loadTable(code: unknown): Promise<TableRow> {
 
 async function loadPlayers(ids: string[]): Promise<Record<string, Player>> {
   if (ids.length === 0) return {};
-  const { data, error } = await db.from("players").select("id, pseudo, balance, table_id").in("id", ids);
+  const { data, error } = await db.from("players").select(PLAYER_COLS).in("id", ids);
   if (error) throw error;
   return Object.fromEntries((data as Player[]).map((p) => [p.id, p]));
 }
@@ -125,6 +128,7 @@ function publicData(t: TableRow, players: Record<string, Player>) {
     deadline: t.state.deadline,
     names: Object.fromEntries([...ids].map((id) => [id, players[id]?.pseudo ?? "?"])),
     balances: Object.fromEntries([...ids].map((id) => [id, players[id]?.balance ?? 0])),
+    avatars: Object.fromEntries([...ids].map((id) => [id, players[id]?.avatar ?? null])),
     round: publicRound(t.state.round),
   };
 }
@@ -210,12 +214,46 @@ async function leaveCurrent(player: Player) {
   await commit(t, { ...extra?.change, seats, status }, extra?.ledger ?? []);
 }
 
+const PHOTO_PREFIX = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/avatars/`;
+
+/** Valide le choix d'avatar et renvoie la valeur à enregistrer (photo envoyée dans le stockage). */
+async function saveAvatar(p: Player, body: Record<string, unknown>): Promise<string | null> {
+  if (body.kind === "initials") return null;
+  if (body.kind === "preset") {
+    const value = `preset:${String(body.preset ?? "")}`;
+    if (!E.presetAvatar(value)) throw new HttpError(400, "Avatar inconnu");
+    return value;
+  }
+  if (body.kind !== "photo" || typeof body.image !== "string") throw new HttpError(400, "Choix d'avatar invalide");
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.from(atob(body.image.replace(/^data:image\/jpeg;base64,/, "")), (c) => c.charCodeAt(0));
+  } catch {
+    throw new HttpError(400, "Image illisible");
+  }
+  if (bytes.length > E.AVATAR_MAX_BYTES) throw new HttpError(400, "Image trop lourde");
+  const size = E.jpegSize(bytes);
+  if (!size) throw new HttpError(400, "L'image doit être une photo JPEG");
+  if (size.width < E.AVATAR_MIN_PX || size.height < E.AVATAR_MIN_PX) {
+    throw new HttpError(400, `Photo trop petite : ${E.AVATAR_MIN_PX} × ${E.AVATAR_MIN_PX} pixels minimum`);
+  }
+  const path = `${p.id}/${randomToken().slice(0, 12)}.jpg`;
+  const { error } = await db.storage.from("avatars").upload(path, bytes, { contentType: "image/jpeg", upsert: false });
+  if (error) throw error;
+  return PHOTO_PREFIX + path;
+}
+
+async function removeOldPhoto(old: string | null, current: string | null) {
+  if (!old || old === current || !old.startsWith(PHOTO_PREFIX)) return;
+  await db.storage.from("avatars").remove([old.slice(PHOTO_PREFIX.length)]).catch(() => undefined);
+}
+
 async function view(player: Player, code: string) {
   const t = await loadTable(code);
   const players = await loadPlayers([...new Set([...t.seats, ...(t.state.round?.players ?? [])])]);
   const r = t.state.round;
   return {
-    me: { id: player.id, pseudo: player.pseudo, balance: players[player.id]?.balance ?? player.balance },
+    me: { id: player.id, pseudo: player.pseudo, balance: players[player.id]?.balance ?? player.balance, avatar: players[player.id]?.avatar ?? player.avatar },
     table: publicData(t, players),
     hand: r ? r.hands[player.id] ?? [] : [],
     legal: r ? E.legalCards(r, player.id) : [],
@@ -233,7 +271,7 @@ async function handle(body: Record<string, unknown>) {
       const { data, error } = await db
         .from("players")
         .insert({ pseudo, token_hash: await sha256(token), balance: E.STARTING_CREDITS })
-        .select("id, pseudo, balance, table_id")
+        .select(PLAYER_COLS)
         .single();
       if (error) throw error;
       return { token, me: data };
@@ -250,6 +288,14 @@ async function handle(body: Record<string, unknown>) {
       if (error) throw error;
       await db.from("ledger").insert({ player_id: p.id, amount, reason: "recharge" });
       return { me: { ...p, balance: E.STARTING_CREDITS } };
+    }
+    case "avatar": {
+      const p = await auth(body.token);
+      const avatar = await saveAvatar(p, body);
+      const { error } = await db.from("players").update({ avatar }).eq("id", p.id);
+      if (error) throw error;
+      await removeOldPhoto(p.avatar, avatar);
+      return { me: { ...p, avatar } };
     }
     case "create": {
       const p = await auth(body.token);
