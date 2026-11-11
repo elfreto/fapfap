@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Card, SPECIAL_RULES, cardId, requiredBalance, sameCard, tableAmounts } from "@fapfap/engine";
-import { ApiError, type TableView, call, supabase } from "./api.ts";
+import { ApiError, type TableView, call, realtimeClient } from "./api.ts";
 import { Avatar, type AvatarChoice, AvatarPicker } from "./Avatar.tsx";
 import { CardFace, sortHand, cardLabel } from "./cards.tsx";
 import { Rules } from "./Rules.tsx";
@@ -33,6 +33,7 @@ export function Table({
   const [picker, setPicker] = useState(false);
   const clockOffset = useRef(0);
   const ticking = useRef(false);
+  const live = useRef(false);
 
   useEffect(() => {
     clockOffset.current = Date.parse(view.serverTime) - Date.now();
@@ -50,23 +51,52 @@ export function Table({
 
   // Temps réel : chaque changement de la table publique déclenche une relecture de ma vue.
   useEffect(() => {
-    const channel = supabase
-      .channel(`table-${code}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "table_public", filter: `id=eq.${code}` }, () => {
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    void realtimeClient().then((supabase) => {
+      if (cancelled) return;
+      const channel = supabase
+        .channel(`table-${code}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "table_public", filter: `id=eq.${code}` }, () => {
+          void refresh();
+        })
+        .subscribe((status) => {
+          live.current = status === "SUBSCRIBED";
+        });
+      stop = () => void supabase.removeChannel(channel);
+    });
+    // Filet de sécurité : relecture espacée quand le temps réel fonctionne, rapprochée sinon ; rien si l'onglet est caché.
+    let last = Date.now();
+    const poll = setInterval(() => {
+      if (document.hidden) return;
+      if (Date.now() - last < (live.current ? 15000 : 4000)) return;
+      last = Date.now();
+      void refresh();
+    }, 2000);
+    const onVisible = () => {
+      if (!document.hidden) {
+        last = Date.now();
         void refresh();
-      })
-      .subscribe();
-    const poll = setInterval(refresh, 4000);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(poll);
-      void supabase.removeChannel(channel);
+      document.removeEventListener("visibilitychange", onVisible);
+      cancelled = true;
+      live.current = false;
+      stop?.();
     };
   }, [code, refresh]);
 
+  // L'horloge ne tourne que pendant une manche (elle sert au compte à rebours).
+  const clockOn = !!round && !round.result;
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 250);
+    if (!clockOn) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(t);
-  }, []);
+  }, [clockOn]);
 
   const act = useCallback(
     async (action: string, params: Record<string, unknown> = {}) => {
@@ -190,6 +220,9 @@ export function Table({
 
       <div className="arena">
         <div className="board">
+          <div className="rail rail-l" />
+          <div className="rail rail-r" />
+          <div className="felt" />
           <div className="felt-line" />
           <div className="emblem" aria-hidden="true">
             <span className="em em-top">♠</span>
@@ -327,7 +360,7 @@ export function Table({
       </nav>
 
       {menu && (
-        <div className="modal" role="dialog" onClick={() => setMenu(false)}>
+        <div className="modal" role="dialog" aria-modal="true" onClick={() => setMenu(false)}>
           <div className="modal-box menu" onClick={(e) => e.stopPropagation()}>
             <h2>Options</h2>
             <p className="muted small">
@@ -374,13 +407,13 @@ export function Table({
       )}
 
       {round?.result && showResult && (
-        <div className="modal" role="dialog">
+        <div className="modal" role="dialog" aria-modal="true">
           <Result view={view} name={name} onNext={() => act("start")} canNext={enoughToStart} onHide={() => setShowResult(false)} />
         </div>
       )}
 
       {confirm && (
-        <div className="modal" role="dialog">
+        <div className="modal" role="dialog" aria-modal="true">
           <div className="modal-box">
             {confirm === "abandon" ? (
               <>
