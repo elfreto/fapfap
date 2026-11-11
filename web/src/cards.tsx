@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Card, Suit } from "@fapfap/engine";
 
 export const SUIT_SYMBOL: Record<Suit, string> = { tchaka: "♣", zing: "♦", koubi: "♥", black: "♠" };
@@ -21,22 +22,15 @@ export function CardFace({
   size = "md",
   state,
   onClick,
-  tag,
 }: {
   card: Card;
   size?: "sm" | "md" | "lg";
   state?: "legal" | "illegal" | "selected" | "winner" | "current" | "won" | "old";
   onClick?: () => void;
-  tag?: string;
 }) {
   const red = RED.includes(card.suit);
   const cls = ["card", `card-${size}`, red ? "red" : "black", state ? `is-${state}` : ""].join(" ");
-  const content = (
-    <>
-      <CardSvg card={card} />
-      {tag && <span className="card-tag">{tag}</span>}
-    </>
-  );
+  const content = <CardSvg card={card} />;
   if (onClick) {
     return (
       <button type="button" className={cls} onClick={onClick} aria-label={cardLabel(card)} disabled={state === "illegal"}>
@@ -51,18 +45,8 @@ export function CardFace({
   );
 }
 
-export function CardBack({ count }: { count: number }) {
-  return (
-    <span className="backs" aria-label={`${count} cartes`}>
-      {Array.from({ length: count }, (_, i) => (
-        <span key={i} className="card-back" />
-      ))}
-    </span>
-  );
-}
-
 /** Carte au modèle simple : grande valeur et petite enseigne en haut à gauche, grand symbole en bas à droite. */
-function CardSvg({ card }: { card: Card }) {
+const CardSvg = memo(function CardSvg({ card }: { card: Card }) {
   const sym = SUIT_SYMBOL[card.suit];
   return (
     <svg className="card-svg" viewBox="0 0 100 140" aria-hidden="true">
@@ -77,4 +61,4 @@ function CardSvg({ card }: { card: Card }) {
       </text>
     </svg>
   );
-}
+}, (a, b) => a.card.suit === b.card.suit && a.card.rank === b.card.rank);

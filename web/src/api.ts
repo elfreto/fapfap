@@ -1,17 +1,23 @@
-import { createClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Card, RoundResult, Trick } from "@fapfap/engine";
 
 // Clés publiques par conception : la clé « publishable » ne donne accès qu'à la vue publique des tables.
 export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://ywrfjeplubwnvjmtyguh.supabase.co";
 export const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY ?? "sb_publishable_tQMqkolhUtrgqr6rUvpI8w_UqsANYOT";
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
+let client: Promise<SupabaseClient> | null = null;
+/** Client temps réel, chargé seulement à l'arrivée sur une table (l'accueil s'affiche sans l'attendre). */
+export function realtimeClient(): Promise<SupabaseClient> {
+  client ??= import("@supabase/supabase-js").then((m) => m.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } }));
+  return client;
+}
 
 export interface Me {
   id: string;
   pseudo: string;
   balance: number;
   table_id?: string | null;
+  avatar?: string | null;
 }
 
 export interface PublicRound {
@@ -34,6 +40,7 @@ export interface PublicTable {
   deadline: string | null;
   names: Record<string, string>;
   balances: Record<string, number>;
+  avatars?: Record<string, string | null>;
   round: PublicRound | null;
 }
 

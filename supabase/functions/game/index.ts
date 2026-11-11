@@ -17,6 +17,8 @@ const CORS = {
 /** Marge accordée au-delà du délai de jeu pour la latence réseau. */
 const GRACE_MS = 2000;
 
+const PLAYER_COLS = "id, pseudo, balance, table_id, avatar";
+
 class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -28,6 +30,7 @@ interface Player {
   pseudo: string;
   balance: number;
   table_id: string | null;
+  avatar: string | null;
 }
 
 interface TableRow {
@@ -66,7 +69,7 @@ async function auth(token: unknown): Promise<Player> {
   if (typeof token !== "string" || token.length < 32) throw new HttpError(401, "Session invalide, reconnectez-vous");
   const { data, error } = await db
     .from("players")
-    .select("id, pseudo, balance, table_id")
+    .select(PLAYER_COLS)
     .eq("token_hash", await sha256(token))
     .maybeSingle();
   if (error) throw error;
@@ -84,7 +87,7 @@ async function loadTable(code: unknown): Promise<TableRow> {
 
 async function loadPlayers(ids: string[]): Promise<Record<string, Player>> {
   if (ids.length === 0) return {};
-  const { data, error } = await db.from("players").select("id, pseudo, balance, table_id").in("id", ids);
+  const { data, error } = await db.from("players").select(PLAYER_COLS).in("id", ids);
   if (error) throw error;
   return Object.fromEntries((data as Player[]).map((p) => [p.id, p]));
 }
@@ -125,14 +128,25 @@ function publicData(t: TableRow, players: Record<string, Player>) {
     deadline: t.state.deadline,
     names: Object.fromEntries([...ids].map((id) => [id, players[id]?.pseudo ?? "?"])),
     balances: Object.fromEntries([...ids].map((id) => [id, players[id]?.balance ?? 0])),
+    avatars: Object.fromEntries([...ids].map((id) => [id, players[id]?.avatar ?? null])),
     round: publicRound(t.state.round),
   };
+}
+
+/** Une table et ses joueurs, tels qu'ils viennent d'être lus ou enregistrés. */
+interface Loaded {
+  table: TableRow;
+  players: Record<string, Player>;
 }
 
 type Change = Partial<Pick<TableRow, "seats" | "status" | "round_no" | "first_player" | "state">>;
 
 /** Enregistre la table (contrôle de version + crédits), relit les joueurs pour la vue publique. */
-async function commit(t: TableRow, change: Change, ledger: Array<{ player_id: string | null; amount: number; reason: string }> = []) {
+async function commit(
+  t: TableRow,
+  change: Change,
+  ledger: Array<{ player_id: string | null; amount: number; reason: string }> = [],
+): Promise<Loaded> {
   const next: TableRow = { ...t, ...change };
   // Les soldes publiés doivent refléter le règlement qui va être appliqué.
   const players = await loadPlayers([...new Set([...next.seats, ...(next.state.round?.players ?? [])])]);
@@ -152,6 +166,7 @@ async function commit(t: TableRow, change: Change, ledger: Array<{ player_id: st
     if (error.message.includes("version_conflict")) throw new HttpError(409, "conflict");
     throw error;
   }
+  return { table: { ...next, version: t.version + 1 }, players };
 }
 
 function deadlineIn(ms = E.TURN_SECONDS * 1000): string {
@@ -210,12 +225,45 @@ async function leaveCurrent(player: Player) {
   await commit(t, { ...extra?.change, seats, status }, extra?.ledger ?? []);
 }
 
-async function view(player: Player, code: string) {
-  const t = await loadTable(code);
-  const players = await loadPlayers([...new Set([...t.seats, ...(t.state.round?.players ?? [])])]);
+const PHOTO_PREFIX = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/avatars/`;
+
+/** Valide le choix d'avatar et renvoie la valeur à enregistrer (photo envoyée dans le stockage). */
+async function saveAvatar(p: Player, body: Record<string, unknown>): Promise<string | null> {
+  if (body.kind === "initials") return null;
+  if (body.kind === "preset") {
+    const value = `preset:${String(body.preset ?? "")}`;
+    if (!E.presetAvatar(value)) throw new HttpError(400, "Avatar inconnu");
+    return value;
+  }
+  if (body.kind !== "photo" || typeof body.image !== "string") throw new HttpError(400, "Choix d'avatar invalide");
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.from(atob(body.image.replace(/^data:image\/jpeg;base64,/, "")), (c) => c.charCodeAt(0));
+  } catch {
+    throw new HttpError(400, "Image illisible");
+  }
+  if (bytes.length > E.AVATAR_MAX_BYTES) throw new HttpError(400, "Image trop lourde");
+  const size = E.jpegSize(bytes);
+  if (!size) throw new HttpError(400, "L'image doit être une photo JPEG");
+  if (size.width < E.AVATAR_MIN_PX || size.height < E.AVATAR_MIN_PX) {
+    throw new HttpError(400, `Photo trop petite : ${E.AVATAR_MIN_PX} × ${E.AVATAR_MIN_PX} pixels minimum`);
+  }
+  const path = `${p.id}/${randomToken().slice(0, 12)}.jpg`;
+  const { error } = await db.storage.from("avatars").upload(path, bytes, { contentType: "image/jpeg", upsert: false });
+  if (error) throw error;
+  return PHOTO_PREFIX + path;
+}
+
+async function removeOldPhoto(old: string | null, current: string | null) {
+  if (!old || old === current || !old.startsWith(PHOTO_PREFIX)) return;
+  await db.storage.from("avatars").remove([old.slice(PHOTO_PREFIX.length)]).catch(() => undefined);
+}
+
+/** Vue d'un joueur à partir d'un état déjà en mémoire (aucune lecture en base). */
+function viewOf(player: Player, { table: t, players }: Loaded) {
   const r = t.state.round;
   return {
-    me: { id: player.id, pseudo: player.pseudo, balance: players[player.id]?.balance ?? player.balance },
+    me: { id: player.id, pseudo: player.pseudo, balance: players[player.id]?.balance ?? player.balance, avatar: players[player.id]?.avatar ?? player.avatar },
     table: publicData(t, players),
     hand: r ? r.hands[player.id] ?? [] : [],
     legal: r ? E.legalCards(r, player.id) : [],
@@ -233,7 +281,7 @@ async function handle(body: Record<string, unknown>) {
       const { data, error } = await db
         .from("players")
         .insert({ pseudo, token_hash: await sha256(token), balance: E.STARTING_CREDITS })
-        .select("id, pseudo, balance, table_id")
+        .select(PLAYER_COLS)
         .single();
       if (error) throw error;
       return { token, me: data };
@@ -250,6 +298,14 @@ async function handle(body: Record<string, unknown>) {
       if (error) throw error;
       await db.from("ledger").insert({ player_id: p.id, amount, reason: "recharge" });
       return { me: { ...p, balance: E.STARTING_CREDITS } };
+    }
+    case "avatar": {
+      const p = await auth(body.token);
+      const avatar = await saveAvatar(p, body);
+      const { error } = await db.from("players").update({ avatar }).eq("id", p.id);
+      if (error) throw error;
+      await removeOldPhoto(p.avatar, avatar);
+      return { me: { ...p, avatar } };
     }
     case "create": {
       const p = await auth(body.token);
@@ -268,13 +324,14 @@ async function handle(body: Record<string, unknown>) {
         if (i === 4) throw error;
       }
       const t = await loadTable(code);
-      await commit(t, { seats: [p.id], first_player: p.id });
-      return view(p, code);
+      return viewOf(p, await commit(t, { seats: [p.id], first_player: p.id }));
     }
     case "join": {
       const p = await auth(body.token);
       const t = await loadTable(body.code);
-      if (t.seats.includes(p.id)) return view(p, t.id);
+      if (t.seats.includes(p.id)) {
+        return viewOf(p, { table: t, players: await loadPlayers([...new Set([...t.seats, ...(t.state.round?.players ?? [])])]) });
+      }
       if (t.status === "closed") throw new HttpError(400, "Cette table est fermée");
       if (t.seats.length >= t.capacity) throw new HttpError(400, "La table est complète");
       if (!E.canPlay(p.balance, t.stake)) throw new HttpError(400, "Solde insuffisant, recharger");
@@ -282,8 +339,7 @@ async function handle(body: Record<string, unknown>) {
       if (engaged && engaged !== t.id) throw new HttpError(400, "Terminez d'abord votre manche en cours");
       await leaveCurrent(p);
       const fresh = await loadTable(t.id);
-      await commit(fresh, { seats: [...fresh.seats, p.id], first_player: fresh.first_player ?? p.id });
-      return view(p, t.id);
+      return viewOf(p, await commit(fresh, { seats: [...fresh.seats, p.id], first_player: fresh.first_player ?? p.id }));
     }
     case "leave": {
       const p = await auth(body.token);
@@ -291,8 +347,7 @@ async function handle(body: Record<string, unknown>) {
       return { ok: true };
     }
     case "start": {
-      const p = await auth(body.token);
-      const t = await loadTable(body.code);
+      const [p, t] = await Promise.all([auth(body.token), loadTable(body.code)]);
       if (!t.seats.includes(p.id)) throw new HttpError(403, "Vous n'êtes pas assis à cette table");
       if (roundActive(t)) throw new HttpError(400, "Une manche est déjà en cours");
       const players = await loadPlayers(t.seats);
@@ -306,14 +361,12 @@ async function handle(body: Record<string, unknown>) {
       const roundNo = t.round_no + 1;
       const tt = { ...t, round_no: roundNo, state: { round: null, deadline: null } };
       const { change, ledger } = afterRound(tt, round);
-      await commit(t, { round_no: roundNo, status: round.result ? "waiting" : "playing", ...change }, ledger);
-      return view(p, t.id);
+      return viewOf(p, await commit(t, { round_no: roundNo, status: round.result ? "waiting" : "playing", ...change }, ledger));
     }
     case "play":
     case "abandon":
     case "tick": {
-      const p = await auth(body.token);
-      const t = await loadTable(body.code);
+      const [p, t] = await Promise.all([auth(body.token), loadTable(body.code)]);
       const r = t.state.round;
       if (!r || r.result) throw new HttpError(400, "Aucune manche en cours");
       const expired = t.state.deadline && Date.now() > Date.parse(t.state.deadline) + GRACE_MS;
@@ -322,7 +375,7 @@ async function handle(body: Record<string, unknown>) {
         // Le délai du joueur attendu est dépassé : il est considéré comme ayant abandonné.
         round = E.timeout(r, r.turn);
       } else if (action === "tick") {
-        return view(p, t.id);
+        return viewOf(p, { table: t, players: await loadPlayers([...new Set([...t.seats, ...r.players])]) });
       } else if (action === "abandon") {
         round = E.abandon(r, p.id);
       } else {
@@ -330,13 +383,15 @@ async function handle(body: Record<string, unknown>) {
         round = E.playCard(r, p.id, card);
       }
       const { change, ledger } = afterRound(t, round);
-      await commit(t, change, ledger);
+      const saved = await commit(t, change, ledger);
       if (expired && action === "play" && r.turn === p.id) throw new HttpError(400, "Temps écoulé : vous avez abandonné la manche");
-      return view(p, t.id);
+      return viewOf(p, saved);
     }
     case "view": {
-      const p = await auth(body.token);
-      return view(p, String(body.code));
+      // Lecture seule, appelée souvent : session et table sont lues en parallèle.
+      const [p, t] = await Promise.all([auth(body.token), loadTable(body.code)]);
+      const players = await loadPlayers([...new Set([...t.seats, ...(t.state.round?.players ?? [])])]);
+      return viewOf(p, { table: t, players });
     }
     default:
       throw new HttpError(400, "Action inconnue");

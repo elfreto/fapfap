@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type Card, SPECIAL_RULES, cardId, requiredBalance, sameCard } from "@fapfap/engine";
-import { ApiError, type TableView, call, supabase } from "./api.ts";
-import { CardFace, sortHand, SUIT_NAME, SUIT_SYMBOL, cardLabel } from "./cards.tsx";
+import { type Card, SPECIAL_RULES, cardId, requiredBalance, sameCard, tableAmounts } from "@fapfap/engine";
+import { ApiError, type TableView, call, realtimeClient } from "./api.ts";
+import { Avatar, type AvatarChoice, AvatarPicker } from "./Avatar.tsx";
+import { CardFace, sortHand, cardLabel } from "./cards.tsx";
 import { Rules } from "./Rules.tsx";
 
 const fmt = (n: number) => n.toLocaleString("fr-FR");
@@ -29,8 +30,10 @@ export function Table({
   const [now, setNow] = useState(Date.now());
   const [copied, setCopied] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [picker, setPicker] = useState(false);
   const clockOffset = useRef(0);
   const ticking = useRef(false);
+  const live = useRef(false);
 
   useEffect(() => {
     clockOffset.current = Date.parse(view.serverTime) - Date.now();
@@ -48,23 +51,52 @@ export function Table({
 
   // Temps réel : chaque changement de la table publique déclenche une relecture de ma vue.
   useEffect(() => {
-    const channel = supabase
-      .channel(`table-${code}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "table_public", filter: `id=eq.${code}` }, () => {
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    void realtimeClient().then((supabase) => {
+      if (cancelled) return;
+      const channel = supabase
+        .channel(`table-${code}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "table_public", filter: `id=eq.${code}` }, () => {
+          void refresh();
+        })
+        .subscribe((status) => {
+          live.current = status === "SUBSCRIBED";
+        });
+      stop = () => void supabase.removeChannel(channel);
+    });
+    // Filet de sécurité : relecture espacée quand le temps réel fonctionne, rapprochée sinon ; rien si l'onglet est caché.
+    let last = Date.now();
+    const poll = setInterval(() => {
+      if (document.hidden) return;
+      if (Date.now() - last < (live.current ? 15000 : 4000)) return;
+      last = Date.now();
+      void refresh();
+    }, 2000);
+    const onVisible = () => {
+      if (!document.hidden) {
+        last = Date.now();
         void refresh();
-      })
-      .subscribe();
-    const poll = setInterval(refresh, 4000);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(poll);
-      void supabase.removeChannel(channel);
+      document.removeEventListener("visibilitychange", onVisible);
+      cancelled = true;
+      live.current = false;
+      stop?.();
     };
   }, [code, refresh]);
 
+  // L'horloge ne tourne que pendant une manche (elle sert au compte à rebours).
+  const clockOn = !!round && !round.result;
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 250);
+    if (!clockOn) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(t);
-  }, []);
+  }, [clockOn]);
 
   const act = useCallback(
     async (action: string, params: Record<string, unknown> = {}) => {
@@ -107,7 +139,7 @@ export function Table({
   const abandonOpen = stillPlaying && round!.abandonOpen !== false;
   const trick = round ? round.tricks[round.tricks.length - 1]! : null;
   const isLegal = (c: Card) => legal.some((l) => sameCard(l, c));
-  const name = (id: string) => (id === me.id ? "Vous" : table.names[id] ?? "?");
+  const name = (id: string) => table.names[id] ?? "?";
   const enoughToStart = table.seats.filter((id) => (table.balances[id] ?? 0) >= requiredBalance(table.stake)).length >= 2;
   const [showResult, setShowResult] = useState(true);
   const resultKey = round?.result ? `${table.roundNo}` : "";
@@ -147,13 +179,15 @@ export function Table({
       void act("play", { card: selected });
     } else if (canStart) void act("start");
   }
-  const status = !round
-    ? table.seats.length < 2
-      ? "En attente de joueurs"
-      : "Prêts à jouer"
-    : ended
-      ? "Manche terminée"
-      : null;
+  // Sommes de la manche en cours : pot et caisse Korat (1 × la mise de chaque joueur chacun).
+  const amounts = tableAmounts(table.stake, active ? round!.players.length : 0);
+  const myBalance = table.balances[me.id] ?? me.balance;
+  const available = active && inRound ? Math.max(0, myBalance - amounts.lockedPerPlayer) : myBalance;
+
+  async function saveAvatar(choice: AvatarChoice) {
+    await call("avatar", { token, ...choice });
+    await refresh();
+  }
 
   return (
     <main className="game">
@@ -163,24 +197,32 @@ export function Table({
         </button>
       </div>
       <div className="hud hud-right">
-        <div className="hud-info">
+        <dl className="hud-info">
           <div>
-            Table {code} · Mise {fmt(table.stake)}
+            <dt>Caisse Korat</dt>
+            <dd>{fmt(amounts.koratFund)}</dd>
           </div>
           <div>
-            {status ?? (
-              <>
-                Tour : <b>{name(round!.turn!)}</b>
-              </>
-            )}
+            <dt>Mise</dt>
+            <dd>{fmt(table.stake)}</dd>
           </div>
-        </div>
+          <div>
+            <dt>Solde disponible</dt>
+            <dd>
+              <span className="coin" />
+              {fmt(available)}
+            </dd>
+          </div>
+        </dl>
       </div>
 
       {offline && <div className="banner warn">Connexion interrompue, reconnexion en cours…</div>}
 
       <div className="arena">
         <div className="board">
+          <div className="rail rail-l" />
+          <div className="rail rail-r" />
+          <div className="felt" />
           <div className="felt-line" />
           <div className="emblem" aria-hidden="true">
             <span className="em em-top">♠</span>
@@ -203,15 +245,14 @@ export function Table({
             )}
             {active && trick && (
               <>
+                <div className="pot">
+                  <span className="pot-label">Pot</span>
+                  <span className="pot-value">
+                    <span className="coin" />
+                    {fmt(amounts.pot)}
+                  </span>
+                </div>
                 <div className="center-trick">Pli {trick.number}/5</div>
-                {trick.ledSuit ? (
-                  <div className={`center-suit ${trick.ledSuit === "zing" || trick.ledSuit === "koubi" ? "red" : ""}`} title="Enseigne demandée">
-                    {SUIT_SYMBOL[trick.ledSuit]}
-                    <span>{SUIT_NAME[trick.ledSuit]}</span>
-                  </div>
-                ) : (
-                  <div className="center-lead">{name(round!.turn!)} mène</div>
-                )}
               </>
             )}
             {ended && !showResult && (
@@ -228,17 +269,9 @@ export function Table({
             return (
               <div key={side} className={`seat seat-${side} ${rp?.abandoned ? "out" : ""}`}>
                 <div className={`badge ${isTurn ? "turn" : ""} ${id ? "" : "empty"}`}>
-                  <div className="avatar" style={id ? { background: avatarColor(id) } : undefined}>
-                    {id ? initials(table.names[id] ?? "?") : "?"}
-                  </div>
+                  {id ? <Avatar id={id} name={name(id)} avatar={table.avatars?.[id] ?? (id === me.id ? me.avatar : null)} /> : <div className="avatar">?</div>}
                   <div className="pill">
                     <span className="pname">{id ? name(id) : "Place libre"}</span>
-                    {id && (
-                      <span className="pcoins">
-                        <span className="coin" />
-                        {fmt(table.balances[id] ?? 0)}
-                      </span>
-                    )}
                     {rp?.abandoned && <span className="ptag">Abandon</span>}
                     {id && !rp && active && <span className="ptag">Prochaine manche</span>}
                     {isTurn && remaining !== null && <span className={`ptimer ${remaining <= 10 ? "hurry" : ""}`}>{remaining} s</span>}
@@ -327,7 +360,7 @@ export function Table({
       </nav>
 
       {menu && (
-        <div className="modal" role="dialog" onClick={() => setMenu(false)}>
+        <div className="modal" role="dialog" aria-modal="true" onClick={() => setMenu(false)}>
           <div className="modal-box menu" onClick={(e) => e.stopPropagation()}>
             <h2>Options</h2>
             <p className="muted small">
@@ -335,6 +368,16 @@ export function Table({
             </p>
             <button type="button" className="btn" onClick={share}>
               {copied ? "Lien copié" : "Inviter des amis"}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setMenu(false);
+                setPicker(true);
+              }}
+            >
+              Changer d'avatar
             </button>
             <button
               type="button"
@@ -364,13 +407,13 @@ export function Table({
       )}
 
       {round?.result && showResult && (
-        <div className="modal" role="dialog">
+        <div className="modal" role="dialog" aria-modal="true">
           <Result view={view} name={name} onNext={() => act("start")} canNext={enoughToStart} onHide={() => setShowResult(false)} />
         </div>
       )}
 
       {confirm && (
-        <div className="modal" role="dialog">
+        <div className="modal" role="dialog" aria-modal="true">
           <div className="modal-box">
             {confirm === "abandon" ? (
               <>
@@ -410,6 +453,7 @@ export function Table({
           </div>
         </div>
       )}
+      {picker && <AvatarPicker me={{ ...me, avatar: table.avatars?.[me.id] ?? me.avatar }} onSave={saveAvatar} onClose={() => setPicker(false)} />}
       {showRules && <Rules onClose={() => setShowRules(false)} />}
     </main>
   );
@@ -516,16 +560,4 @@ function Result({
       {!canNext && <p className="muted small">Il faut au moins 2 joueurs avec 2 × la mise.</p>}
     </div>
   );
-}
-
-const AVATAR_COLORS = ["#e2553f", "#2f80ed", "#27ae60", "#9b51e0", "#f2994a", "#16a5a5", "#d6336c"];
-function avatarColor(id: string): string {
-  let h = 0;
-  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return AVATAR_COLORS[h % AVATAR_COLORS.length]!;
-}
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const s = parts.length > 1 ? parts[0]![0]! + parts[1]![0]! : (parts[0] ?? "?").slice(0, 2);
-  return s.toUpperCase();
 }
