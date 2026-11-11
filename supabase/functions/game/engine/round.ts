@@ -4,7 +4,8 @@ import { type SpecialWin, resolveSpecial } from "./special.ts";
 import type { Payout } from "./special.ts";
 
 export const TRICKS_PER_ROUND = 5;
-export const TURN_SECONDS = 30;
+/** Délai pour jouer (décision LeCerf du 11/11/2026 : 60 s). */
+export const TURN_SECONDS = 60;
 
 export class RuleError extends Error {
   constructor(
@@ -53,7 +54,7 @@ export interface RoundResult {
 
 export interface RoundState {
   stake: number;
-  /** Joueurs de la manche dans l'ordre horaire, en commençant par le premier joueur. */
+  /** Joueurs de la manche dans l'ordre de jeu (sens inverse des aiguilles d'une montre), en commençant par le premier joueur. */
   players: string[];
   firstPlayer: string;
   hands: Record<string, Card[]>;
@@ -70,7 +71,7 @@ export interface RoundState {
 
 export interface NewRoundInput {
   stake: number;
-  /** Joueurs dans l'ordre horaire des places. */
+  /** Joueurs dans l'ordre de jeu des places (sens inverse des aiguilles d'une montre). */
   seats: readonly string[];
   firstPlayer: string;
   randomInt?: RandomInt;
@@ -78,7 +79,7 @@ export interface NewRoundInput {
   cutAt?: number;
 }
 
-/** Ordre horaire en partant de `start`. */
+/** Ordre de jeu en partant de `start`. */
 export function rotate<T>(list: readonly T[], start: T): T[] {
   const i = list.indexOf(start);
   if (i < 0) throw new RuleError("invalid_setup", "Joueur de départ absent");
@@ -86,7 +87,7 @@ export function rotate<T>(list: readonly T[], start: T): T[] {
 }
 
 /**
- * Distribution : depuis le premier joueur, sens horaire, 3 cartes chacun puis 2 cartes chacun.
+ * Distribution : depuis le premier joueur, dans l'ordre de jeu, 3 cartes chacun puis 2 cartes chacun.
  * Renvoie les mains et les cartes restées hors jeu.
  */
 export function deal(deck: readonly Card[], players: readonly string[]): { hands: Record<string, Card[]>; rest: Card[] } {
@@ -155,7 +156,7 @@ export function legalCards(state: RoundState, player: string): Card[] {
   return follow.length > 0 ? follow : [...hand];
 }
 
-/** Prochain joueur actif, dans le sens horaire après `from`, qui n'a pas encore joué dans le pli. */
+/** Prochain joueur actif, dans l'ordre de jeu après `from`, qui n'a pas encore joué dans le pli. */
 function nextToPlay(state: RoundState, from: string): string | null {
   const trick = currentTrick(state);
   const order = rotate(state.players, from).slice(1).concat(from);
@@ -258,7 +259,7 @@ export function playCard(prev: RoundState, player: string, card: Card): RoundSta
 
 /**
  * Le 3e pli a-t-il commencé (première carte du 3e pli posée) ?
- * Avant ce moment, le bouton « Abandonner » est disponible ; ensuite seul le délai de 30 s fait abandonner.
+ * Avant ce moment, le bouton « Abandonner » est disponible ; ensuite seul le délai de 60 s fait abandonner.
  */
 export function thirdTrickStarted(state: RoundState): boolean {
   const trick = currentTrick(state);
@@ -272,8 +273,8 @@ export function canAbandon(state: RoundState, player: string): boolean {
 
 /**
  * Qui mène quand le joueur qui devait mener abandonne :
- * au 1er pli, le suivant dans le sens horaire ; ensuite, le joueur encore en jeu qui avait la plus
- * haute carte de l'enseigne demandée au pli précédent (à défaut, le suivant dans le sens horaire).
+ * au 1er pli, le suivant dans l'ordre de jeu ; ensuite, le joueur encore en jeu qui avait la plus
+ * haute carte de l'enseigne demandée au pli précédent (à défaut, le suivant dans l'ordre de jeu).
  */
 function replacementLeader(state: RoundState, quitter: string): string | null {
   const trick = currentTrick(state);
@@ -326,14 +327,14 @@ export function abandon(prev: RoundState, player: string): RoundState {
   return doAbandon(prev, player);
 }
 
-/** 30 secondes écoulées sans jouer : le joueur attendu est considéré comme ayant abandonné, à tout moment. */
+/** 60 secondes écoulées sans jouer : le joueur attendu est considéré comme ayant abandonné, à tout moment. */
 export function timeout(prev: RoundState, player: string): RoundState {
   assertInRound(prev, player);
   if (prev.turn !== player) throw new RuleError("not_your_turn", "Le délai ne concerne que le joueur attendu");
   return doAbandon(prev, player);
 }
 
-/** Joueur qui commence la manche suivante : celui à gauche (suivant horaire) du vainqueur, parmi les présents. */
+/** Joueur qui commence la manche suivante : celui à droite du vainqueur (suivant dans l'ordre de jeu), parmi les présents. */
 export function nextFirstPlayer(seats: readonly string[], winner: string, present: readonly string[] = seats): string {
   const order = rotate(seats, winner).slice(1).concat(winner);
   const next = order.find((p) => present.includes(p));

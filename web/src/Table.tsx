@@ -113,7 +113,7 @@ export function Table({
   const resultKey = round?.result ? `${table.roundNo}` : "";
   useEffect(() => setShowResult(true), [resultKey]);
 
-  // Places autour de la table : moi en bas, puis les autres dans le sens horaire (gauche, haut, droite).
+  // Places autour de la table : moi en bas, puis les autres dans l'ordre de jeu, sens inverse des aiguilles d'une montre (droite, haut, gauche).
   const sides = useMemo(() => seatLayout(table.seats, round?.players.map((p) => p.id) ?? [], me.id, table.capacity), [table.seats, round, me.id, table.capacity]);
   const playsBy = useMemo(() => {
     const m: Record<string, Array<{ card: Card; trick: number; won: boolean }>> = {};
@@ -380,7 +380,7 @@ export function Table({
             ) : stillPlaying && !abandonOpen ? (
               <>
                 <h2>Impossible de quitter maintenant</h2>
-                <p>À partir du 3e pli, on ne peut plus abandonner : terminez la manche (sans jouer, vous abandonnez au bout de 30 s).</p>
+                <p>À partir du 3e pli, on ne peut plus abandonner : terminez la manche (sans jouer, vous abandonnez au bout de 60 s).</p>
               </>
             ) : (
               <>
@@ -416,9 +416,9 @@ export function Table({
 }
 
 type Side = "bottom" | "left" | "top" | "right";
-const LAYOUTS: Record<number, Side[]> = { 2: ["bottom", "top"], 3: ["bottom", "left", "right"], 4: ["bottom", "left", "top", "right"] };
+const LAYOUTS: Record<number, Side[]> = { 2: ["bottom", "top"], 3: ["bottom", "right", "left"], 4: ["bottom", "right", "top", "left"] };
 
-/** Associe chaque côté de la table à un joueur (sens horaire à partir de moi, en bas). */
+/** Associe chaque côté de la table à un joueur (ordre de jeu anti-horaire à partir de moi, en bas). */
 function seatLayout(seats: string[], roundPlayers: string[], me: string, capacity: number): Array<{ side: Side; id: string | null }> {
   const all = [...seats, ...roundPlayers.filter((p) => !seats.includes(p))];
   const order = rotateFrom(all, me);

@@ -63,7 +63,7 @@ describe("déroulement d'une manche à 3 joueurs", () => {
     s = playCard(s, "C", c("tchaka", 9));
     expect(s.tricks[3]!.winner).toBe("B");
     expect(s.turn).toBe("B");
-    // Pli 5 : B mène, puis C et A dans le sens horaire.
+    // Pli 5 : B mène, puis C et A dans l'ordre de jeu.
     s = playCard(s, "B", c("black", 9));
     expectRule(() => playCard(s, "A", c("black", 5)), "not_your_turn");
     s = playCard(s, "C", c("black", 8));
@@ -185,7 +185,7 @@ describe("abandon et minuteur", () => {
     expectRule(() => playCard(s, "C", c("zing", 3)), "already_abandoned");
   });
 
-  it("30 s écoulées = abandon, et le tour passe au suivant", () => {
+  it("délai écoulé = abandon, et le tour passe au suivant", () => {
     let s = playCard(round3(), "A", c("zing", 10));
     expectRule(() => timeout(s, "C"), "not_your_turn");
     s = timeout(s, "B");
@@ -308,7 +308,7 @@ describe("fenêtre d'abandon et paiements selon le moment", () => {
     s = playCard(s, "D", c("zing", 6));
     expect(s.turn).toBe("C");
     s = abandon(s, "C");
-    // D est le suivant dans le sens horaire, mais B avait le plus haut koubi restant.
+    // D est le suivant dans l'ordre de jeu, mais B avait le plus haut koubi restant.
     expect(s.turn).toBe("B");
     expect(s.tricks[1]!.leader).toBe("B");
   });

@@ -96,9 +96,9 @@ input, select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 
 .center-info p { margin: 0; }
 .center-trick { font-weight: 800; letter-spacing: 0.03em; }
 .center-lead { font-weight: 600; }
-.center-suit { display: grid; justify-items: center; font-size: 9cqw; line-height: 1; color: var(--black); background: #fff; border-radius: 2cqw; padding: 1cqw 2.5cqw 0.8cqw; box-shadow: 0 2px 6px #0006; text-shadow: none; }
+.center-suit { display: grid; justify-items: center; font-size: 4.5cqw; line-height: 1; color: var(--black); background: #fff; border-radius: 1cqw; padding: 0.5cqw 1.3cqw 0.4cqw; box-shadow: 0 2px 6px #0006; text-shadow: none; }
 .center-suit.red { color: var(--red); }
-.center-suit span { font-size: 2.3cqw; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.center-suit span { font-size: 1.3cqw; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 
 /* Joueurs : chaque élément est placé par rapport à la table */
 .seat { display: contents; }
