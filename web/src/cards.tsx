@@ -45,20 +45,29 @@ export function CardFace({
   );
 }
 
-/** Carte au modèle simple : grande valeur et petite enseigne en haut à gauche, grand symbole en bas à droite. */
+/**
+ * Carte au modèle classique : valeur et petite enseigne en haut à gauche, les mêmes retournées
+ * en bas à droite, grand symbole au centre. La valeur reste lisible quand les cartes se recouvrent.
+ */
 const CardSvg = memo(function CardSvg({ card }: { card: Card }) {
   const sym = SUIT_SYMBOL[card.suit];
-  return (
-    <svg className="card-svg" viewBox="0 0 100 140" aria-hidden="true">
-      <text x="9" y="36" className="cs-rank" letterSpacing={card.rank === 10 ? -3 : undefined}>
+  const corner = (
+    <>
+      <text x="17" y="33" className="cs-rank" textAnchor="middle" textLength={card.rank === 10 ? 24 : undefined} lengthAdjust="spacingAndGlyphs">
         {card.rank}
       </text>
-      <text x="21" y="60" className="cs-suit" textAnchor="middle">
+      <text x="17" y="56" className="cs-suit" textAnchor="middle">
         {sym}
       </text>
-      <text x="64" y="126" className="cs-big" textAnchor="middle">
+    </>
+  );
+  return (
+    <svg className="card-svg" viewBox="0 0 100 140" aria-hidden="true">
+      {corner}
+      <text x="50" y="91" className="cs-big" textAnchor="middle">
         {sym}
       </text>
+      <g transform="rotate(180 50 70)">{corner}</g>
     </svg>
   );
 }, (a, b) => a.card.suit === b.card.suit && a.card.rank === b.card.rank);

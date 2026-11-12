@@ -220,9 +220,9 @@ input, select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 
 .card { position: relative; flex: none; background: linear-gradient(160deg, #fff, #f3f1ea); border-radius: 8px; border: 1px solid #0003; box-shadow: 0 2px 6px #0006; display: grid; place-items: center; padding: 0; transition: transform 0.12s ease, box-shadow 0.12s ease; }
 .card.red { color: var(--red); }
 .card-svg { position: absolute; inset: 0; width: 100%; height: 100%; fill: currentColor; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-.cs-rank { font-size: 34px; font-weight: 600; }
-.cs-suit { font-size: 21px; }
-.cs-big { font-size: 60px; }
+.cs-rank { font-size: 32px; font-weight: 600; }
+.cs-suit { font-size: 24px; }
+.cs-big { font-size: 58px; }
 .card.black { color: var(--black); }
 .card-md { width: 58px; height: 81px; }
 .card-lg { width: 72px; height: 101px; }
