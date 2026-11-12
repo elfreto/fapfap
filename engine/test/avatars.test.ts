@@ -28,7 +28,7 @@ describe("avatars", () => {
 });
 
 describe("sommes de la table", () => {
-  it("pot et caisse Korat = mise × joueurs, 2 × la mise bloquée par joueur", () => {
-    expect(tableAmounts(100, 4)).toEqual({ pot: 400, koratFund: 400, lockedPerPlayer: 200 });
+  it("pot = mise × joueurs, caisse Korat = 1 × la mise, 2 × la mise bloquée par joueur", () => {
+    expect(tableAmounts(100, 4)).toEqual({ pot: 400, koratFund: 100, lockedPerPlayer: 200 });
   });
 });
