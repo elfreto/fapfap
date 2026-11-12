@@ -179,7 +179,7 @@ export function Table({
       void act("play", { card: selected });
     } else if (canStart) void act("start");
   }
-  // Sommes de la manche en cours : pot et caisse Korat (1 × la mise de chaque joueur chacun).
+  // Sommes de la manche en cours : pot (1 × la mise par joueur) et caisse Korat du joueur (1 × la mise).
   const amounts = tableAmounts(table.stake, active ? round!.players.length : 0);
   const myBalance = table.balances[me.id] ?? me.balance;
   const available = active && inRound ? Math.max(0, myBalance - amounts.lockedPerPlayer) : myBalance;

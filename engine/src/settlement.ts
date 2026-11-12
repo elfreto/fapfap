@@ -79,9 +79,10 @@ export function settle(input: SettlementInput): Settlement {
 }
 
 /**
- * Sommes bloquées sur la table pendant une manche : chaque joueur met 1 × la mise au pot
- * et 1 × la mise dans la caisse Korat (qui sert à payer le double en cas de Korat).
+ * Sommes bloquées pendant une manche : chaque joueur met 1 × la mise au pot (total affiché
+ * au centre) et 1 × la mise dans sa caisse Korat, qui sert à payer le double en cas de Korat.
+ * La caisse Korat affichée est celle du joueur : 1 × la mise, quel que soit le nombre de joueurs.
  */
 export function tableAmounts(stake: number, playersInRound: number): { pot: number; koratFund: number; lockedPerPlayer: number } {
-  return { pot: stake * playersInRound, koratFund: stake * playersInRound, lockedPerPlayer: requiredBalance(stake) };
+  return { pot: stake * playersInRound, koratFund: playersInRound > 0 ? stake : 0, lockedPerPlayer: requiredBalance(stake) };
 }
