@@ -19,6 +19,13 @@ const GRACE_MS = 2000;
 
 const PLAYER_COLS = "id, pseudo, balance, table_id, avatar";
 
+/** Limites par personne. Une partie normale fait moins de 30 appels par minute. */
+const CALLS_PER_MINUTE = 120;
+const REGISTRATIONS_PER_HOUR = 5;
+const REGISTRATIONS_PER_DAY = 15;
+/** Les tables fermées sont supprimées après ce délai. */
+const CLOSED_TABLE_TTL_MS = 24 * 3600 * 1000;
+
 class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -63,6 +70,37 @@ function randomToken(): string {
 function randomCode(): string {
   const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   return Array.from({ length: 5 }, () => letters[E.cryptoRandomInt(letters.length)]).join("");
+}
+
+/** Appels récents par personne (jeton de session, sinon adresse), gardés en mémoire du serveur. */
+const recentCalls = new Map<string, number[]>();
+
+function allowCall(who: string): boolean {
+  const now = Date.now();
+  const calls = (recentCalls.get(who) ?? []).filter((t) => now - t < 60_000);
+  calls.push(now);
+  recentCalls.set(who, calls);
+  if (recentCalls.size > 5000) {
+    for (const [k, v] of recentCalls) if (now - v[v.length - 1]! > 60_000) recentCalls.delete(k);
+  }
+  return calls.length <= CALLS_PER_MINUTE;
+}
+
+/** Adresse du joueur, hachée : elle ne sert qu'à compter. */
+async function callerKey(req: Request): Promise<string> {
+  const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0]!.trim() || "inconnue";
+  return (await sha256(`fapfap:${ip}`)).slice(0, 24);
+}
+
+/** Inscriptions : limite stricte par adresse, comptée en base. */
+async function allowRegistration(caller: string): Promise<boolean> {
+  const [hour, day] = await Promise.all([
+    db.rpc("rate_hit", { p_key: `reg:${caller}`, p_seconds: 3600, p_max: REGISTRATIONS_PER_HOUR }),
+    db.rpc("rate_hit", { p_key: `reg:${caller}`, p_seconds: 86400, p_max: REGISTRATIONS_PER_DAY }),
+  ]);
+  if (hour.error) throw hour.error;
+  if (day.error) throw day.error;
+  return hour.data === true && day.data === true;
 }
 
 async function auth(token: unknown): Promise<Player> {
@@ -271,12 +309,15 @@ function viewOf(player: Player, { table: t, players }: Loaded) {
   };
 }
 
-async function handle(body: Record<string, unknown>) {
+async function handle(body: Record<string, unknown>, caller: string) {
   const action = body.action;
   switch (action) {
     case "register": {
       const pseudo = String(body.pseudo ?? "").trim().slice(0, 20);
       if (!pseudo) throw new HttpError(400, "Choisissez un pseudo");
+      if (!(await allowRegistration(caller))) {
+        throw new HttpError(429, "Trop d'inscriptions depuis cette connexion. Réessayez plus tard.");
+      }
       const token = randomToken();
       const { data, error } = await db
         .from("players")
@@ -316,6 +357,8 @@ async function handle(body: Record<string, unknown>) {
       if (!E.canPlay(p.balance, stake)) throw new HttpError(400, "Solde insuffisant, recharger");
       if (await engagedTable(p.id)) throw new HttpError(400, "Terminez d'abord votre manche en cours");
       await leaveCurrent(p);
+      // Ménage : les tables fermées depuis plus d'un jour sont supprimées.
+      await db.from("game_tables").delete().eq("status", "closed").lt("updated_at", new Date(Date.now() - CLOSED_TABLE_TTL_MS).toISOString());
       let code = "";
       for (let i = 0; i < 5; i++) {
         code = randomCode();
@@ -407,10 +450,13 @@ Deno.serve(async (req) => {
   } catch {
     return json({ error: "Requête invalide" }, 400);
   }
+  const caller = await callerKey(req);
+  const who = typeof body.token === "string" && body.token.length >= 32 ? body.token : caller;
+  if (!allowCall(who)) return json({ error: "Trop d'appels à la suite. Patientez une minute." }, 429);
   // En cas d'actions simultanées, on rejoue l'action sur l'état le plus récent.
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      return json(await handle(body));
+      return json(await handle(body, caller));
     } catch (e) {
       if (e instanceof HttpError && e.status === 409 && attempt < 3) continue;
       if (e instanceof HttpError) return json({ error: e.message }, e.status);
