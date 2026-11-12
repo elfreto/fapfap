@@ -278,7 +278,7 @@ export function Table({
               </>
             )}
             {ended && phase === "hidden" && (
-              <button type="button" className="btn small primary" onClick={() => setPhase("detail")}>
+              <button type="button" className="btn small primary" onClick={() => setPhase(inRound ? "alert" : "detail")}>
                 Voir le résultat
               </button>
             )}
@@ -433,6 +433,7 @@ export function Table({
           <Outcome
             won={round.result.winner === me.id}
             gross={round.result.settlement.gain}
+            onHide={() => setPhase("hidden")}
             onNext={() => act("start")}
             canNext={enoughToStart}
           />
@@ -508,7 +509,7 @@ function rotateFrom(list: string[], start: string): string[] {
 }
 
 /** Alerte de fin de manche : victoire (avec le gain brut) ou défaite. */
-function Outcome({ won, gross, onNext, canNext }: { won: boolean; gross: number; onNext: () => void; canNext: boolean }) {
+function Outcome({ won, gross, onHide, onNext, canNext }: { won: boolean; gross: number; onHide: () => void; onNext: () => void; canNext: boolean }) {
   return (
     <div className={`outcome ${won ? "win" : "lost"}`}>
       <h2 className="outcome-title">{won ? "TU AS WIN LE GIO" : "TU AS LOST LE GIO"}</h2>
@@ -519,6 +520,9 @@ function Outcome({ won, gross, onNext, canNext }: { won: boolean; gross: number;
         </p>
       )}
       <div className="outcome-actions">
+        <button type="button" className="btn ghost" onClick={onHide}>
+          Voir la table
+        </button>
         <button type="button" className="btn primary" disabled={!canNext} onClick={onNext}>
           Manche suivante
         </button>
