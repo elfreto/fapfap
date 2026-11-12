@@ -302,7 +302,7 @@ export function Table({
                       const state = !myTurn ? undefined : selected === cid ? "selected" : legalCard ? "legal" : "illegal";
                       const off = i - (hand.length - 1) / 2;
                       return (
-                        <div key={cid} className="fan" style={{ transform: `rotate(${off * 7}deg) translateY(${Math.abs(off) * 1.2}cqw)` }}>
+                        <div key={cid} className="fan" style={{ transform: `rotate(${off * 7}deg) translateY(calc(${Math.abs(off) * 1.2} * var(--u)))` }}>
                           <CardFace
                             card={c}
                             size="lg"
