@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Card, SPECIAL_RULES, cardId, requiredBalance, sameCard, tableAmounts } from "@fapfap/engine";
 import { ApiError, type TableView, call, realtimeClient } from "./api.ts";
 import { Avatar, type AvatarChoice, AvatarPicker } from "./Avatar.tsx";
@@ -6,6 +6,8 @@ import { CardFace, sortHand, cardLabel } from "./cards.tsx";
 import { Rules } from "./Rules.tsx";
 
 const fmt = (n: number) => n.toLocaleString("fr-FR");
+/** Durée de l'animation Korat avant l'alerte de victoire ou défaite. */
+const KORAT_MS = 2000;
 
 export function Table({
   token,
@@ -141,9 +143,17 @@ export function Table({
   const isLegal = (c: Card) => legal.some((l) => sameCard(l, c));
   const name = (id: string) => table.names[id] ?? "?";
   const enoughToStart = table.seats.filter((id) => (table.balances[id] ?? 0) >= requiredBalance(table.stake)).length >= 2;
-  const [showResult, setShowResult] = useState(true);
+  // Fin de manche : animation Korat (2 s) s'il y a lieu, puis alerte de victoire ou défaite, puis détail des comptes.
+  const [phase, setPhase] = useState<"korat" | "alert" | "detail" | "hidden">("alert");
   const resultKey = round?.result ? `${table.roundNo}` : "";
-  useEffect(() => setShowResult(true), [resultKey]);
+  const isKorat = round?.result?.payout === "korat";
+  useEffect(() => {
+    if (!resultKey) return;
+    if (!isKorat) return setPhase("alert");
+    setPhase("korat");
+    const t = setTimeout(() => setPhase("alert"), KORAT_MS);
+    return () => clearTimeout(t);
+  }, [resultKey, isKorat]);
 
   // Places autour de la table : moi en bas, puis les autres dans l'ordre de jeu, sens inverse des aiguilles d'une montre (droite, haut, gauche).
   const sides = useMemo(() => seatLayout(table.seats, round?.players.map((p) => p.id) ?? [], me.id, table.capacity), [table.seats, round, me.id, table.capacity]);
@@ -224,6 +234,18 @@ export function Table({
           <div className="rail rail-r" />
           <div className="felt" />
           <div className="felt-line" />
+          {ended && phase === "korat" && (
+            <div className="korat-boom" role="status" aria-label="Korat">
+              <span className="kb-flash" />
+              <span className="kb-rays" />
+              <span className="kb-ring" />
+              <span className="kb-ring kb-ring2" />
+              {Array.from({ length: 14 }, (_, i) => (
+                <span key={i} className="kb-spark" style={{ "--a": `${i * 25.7}deg`, "--d": `${(i % 4) * 0.06}s` } as CSSProperties} />
+              ))}
+              <span className="kb-word">KORAT</span>
+            </div>
+          )}
           <div className="emblem" aria-hidden="true">
             <span className="em em-top">♠</span>
             <span className="em em-left">♥</span>
@@ -255,8 +277,8 @@ export function Table({
                 <div className="center-trick">Pli {trick.number}/5</div>
               </>
             )}
-            {ended && !showResult && (
-              <button type="button" className="btn small primary" onClick={() => setShowResult(true)}>
+            {ended && phase === "hidden" && (
+              <button type="button" className="btn small primary" onClick={() => setPhase("detail")}>
                 Voir le résultat
               </button>
             )}
@@ -406,9 +428,20 @@ export function Table({
         </div>
       )}
 
-      {round?.result && showResult && (
+      {round?.result && phase === "alert" && inRound && (
         <div className="modal" role="dialog" aria-modal="true">
-          <Result view={view} name={name} onNext={() => act("start")} canNext={enoughToStart} onHide={() => setShowResult(false)} />
+          <Outcome
+            won={round.result.winner === me.id}
+            gross={round.result.settlement.gain}
+            onDetail={() => setPhase("detail")}
+            onNext={() => act("start")}
+            canNext={enoughToStart}
+          />
+        </div>
+      )}
+      {round?.result && (phase === "detail" || (phase === "alert" && !inRound)) && (
+        <div className="modal" role="dialog" aria-modal="true">
+          <Result view={view} name={name} onNext={() => act("start")} canNext={enoughToStart} onHide={() => setPhase("hidden")} />
         </div>
       )}
 
@@ -473,6 +506,29 @@ function seatLayout(seats: string[], roundPlayers: string[], me: string, capacit
 function rotateFrom(list: string[], start: string): string[] {
   const i = list.indexOf(start);
   return i < 0 ? list : [...list.slice(i), ...list.slice(0, i)];
+}
+
+/** Alerte de fin de manche : victoire (avec le gain brut) ou défaite. */
+function Outcome({ won, gross, onDetail, onNext, canNext }: { won: boolean; gross: number; onDetail: () => void; onNext: () => void; canNext: boolean }) {
+  return (
+    <div className={`outcome ${won ? "win" : "lost"}`}>
+      <h2 className="outcome-title">{won ? "TU AS WIN LE GIO" : "TU AS LOST LE GIO"}</h2>
+      {won && (
+        <p className="outcome-gain">
+          <b>+ {fmt(gross)}</b>
+          <span>Pot brut avant commission</span>
+        </p>
+      )}
+      <div className="outcome-actions">
+        <button type="button" className="btn ghost" onClick={onDetail}>
+          Voir le détail
+        </button>
+        <button type="button" className="btn primary" disabled={!canNext} onClick={onNext}>
+          Manche suivante
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function Result({
