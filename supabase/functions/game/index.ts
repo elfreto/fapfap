@@ -17,13 +17,17 @@ const CORS = {
 /** Marge accordée au-delà du délai de jeu pour la latence réseau. */
 const GRACE_MS = 2000;
 
-const PLAYER_COLS = "id, pseudo, balance, table_id, avatar, is_admin";
+const PLAYER_COLS = "id, pseudo, balance, table_id, avatar, is_admin, has_login, auth_provider";
 const TX_COLS = "id, kind, method, amount, reference, account, status, created_at";
 
 /** Limites par personne. Une partie normale fait moins de 30 appels par minute. */
 const CALLS_PER_MINUTE = 120;
 const REGISTRATIONS_PER_HOUR = 5;
 const REGISTRATIONS_PER_DAY = 15;
+/** Essais de connexion par mot de passe : par connexion et par pseudo, sur 15 minutes. */
+const LOGIN_TRIES_PER_CALLER = 20;
+const LOGIN_TRIES_PER_PSEUDO = 10;
+const PBKDF2_ITERATIONS = 100_000;
 /** Les tables fermées sont supprimées après ce délai. */
 const CLOSED_TABLE_TTL_MS = 24 * 3600 * 1000;
 
@@ -40,6 +44,8 @@ interface Player {
   table_id: string | null;
   avatar: string | null;
   is_admin?: boolean;
+  has_login?: boolean;
+  auth_provider?: string | null;
 }
 
 interface TableRow {
@@ -103,6 +109,68 @@ async function allowRegistration(caller: string): Promise<boolean> {
   if (hour.error) throw hour.error;
   if (day.error) throw day.error;
   return hour.data === true && day.data === true;
+}
+
+function b64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function unb64(text: string): Uint8Array {
+  return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+}
+
+async function pbkdf2(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256);
+  return new Uint8Array(bits);
+}
+
+/** Mot de passe haché : « pbkdf2$itérations$sel$empreinte ». */
+async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${b64(salt)}$${b64(await pbkdf2(password, salt, PBKDF2_ITERATIONS))}`;
+}
+
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const [algo, iter, salt, hash] = stored.split("$");
+  if (algo !== "pbkdf2" || !iter || !salt || !hash) return false;
+  const got = await pbkdf2(password, unb64(salt), Number(iter));
+  const want = unb64(hash);
+  if (got.length !== want.length) return false;
+  let diff = 0;
+  for (let i = 0; i < got.length; i++) diff |= got[i]! ^ want[i]!;
+  return diff === 0;
+}
+
+/** Motif de recherche d'un pseudo, sans tenir compte des majuscules (%, _ et \ neutralisés). */
+function pseudoPattern(pseudo: string): string {
+  return pseudo.replace(/[\\%_]/g, (c) => "\\" + c);
+}
+
+async function pseudoTaken(pseudo: string, exceptId?: string): Promise<boolean> {
+  let q = db.from("players").select("id").ilike("pseudo", pseudoPattern(pseudo));
+  if (exceptId) q = q.neq("id", exceptId);
+  const { data, error } = await q.limit(1);
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
+/** Nouvelle session : un nouveau jeton remplace le précédent (une session à la fois par compte). */
+async function openSession(playerId: string): Promise<{ token: string; me: Player }> {
+  const token = randomToken();
+  const { data, error } = await db.from("players").update({ token_hash: await sha256(token) }).eq("id", playerId).select(PLAYER_COLS).single();
+  if (error) throw error;
+  return { token, me: data as Player };
+}
+
+async function allowLogin(caller: string, pseudo: string): Promise<boolean> {
+  const [a, b] = await Promise.all([
+    db.rpc("rate_hit", { p_key: `login:${caller}`, p_seconds: 900, p_max: LOGIN_TRIES_PER_CALLER }),
+    db.rpc("rate_hit", { p_key: `login-pseudo:${pseudo.toLowerCase()}`, p_seconds: 900, p_max: LOGIN_TRIES_PER_PSEUDO }),
+  ]);
+  if (a.error) throw a.error;
+  if (b.error) throw b.error;
+  return a.data === true && b.data === true;
 }
 
 async function auth(token: unknown): Promise<Player> {
@@ -309,7 +377,7 @@ async function removeOldPhoto(old: string | null, current: string | null) {
 function viewOf(player: Player, { table: t, players }: Loaded) {
   const r = t.state.round;
   return {
-    me: { id: player.id, pseudo: player.pseudo, balance: players[player.id]?.balance ?? player.balance, avatar: players[player.id]?.avatar ?? player.avatar, is_admin: player.is_admin },
+    me: { id: player.id, pseudo: player.pseudo, balance: players[player.id]?.balance ?? player.balance, avatar: players[player.id]?.avatar ?? player.avatar, is_admin: player.is_admin, has_login: player.has_login, auth_provider: player.auth_provider },
     table: publicData(t, players),
     hand: r ? r.hands[player.id] ?? [] : [],
     legal: r ? E.legalCards(r, player.id) : [],
@@ -321,19 +389,86 @@ async function handle(body: Record<string, unknown>, caller: string) {
   const action = body.action;
   switch (action) {
     case "register": {
-      const pseudo = String(body.pseudo ?? "").trim().slice(0, 20);
-      if (!pseudo) throw new HttpError(400, "Choisissez un pseudo");
+      const pseudo = E.cleanPseudo(String(body.pseudo ?? ""));
+      const password = typeof body.password === "string" ? body.password : "";
+      const problem = E.checkPseudo(pseudo) ?? E.checkPassword(password);
+      if (problem) throw new HttpError(400, problem);
       if (!(await allowRegistration(caller))) {
         throw new HttpError(429, "Trop d'inscriptions depuis cette connexion. Réessayez plus tard.");
       }
+      if (await pseudoTaken(pseudo)) throw new HttpError(400, "Ce pseudo est déjà pris");
       const token = randomToken();
       const { data, error } = await db
         .from("players")
-        .insert({ pseudo, token_hash: await sha256(token), balance: E.STARTING_CREDITS })
+        .insert({ pseudo, token_hash: await sha256(token), balance: E.STARTING_CREDITS, password_hash: await hashPassword(password) })
         .select(PLAYER_COLS)
         .single();
-      if (error) throw error;
+      if (error) {
+        if (error.code === "23505") throw new HttpError(400, "Ce pseudo est déjà pris");
+        throw error;
+      }
       return { token, me: data };
+    }
+    case "login": {
+      const pseudo = E.cleanPseudo(String(body.pseudo ?? ""));
+      const password = typeof body.password === "string" ? body.password : "";
+      if (!pseudo || !password) throw new HttpError(400, "Saisis ton pseudo et ton mot de passe");
+      if (!(await allowLogin(caller, pseudo))) throw new HttpError(429, "Trop d'essais. Réessaie dans 15 minutes.");
+      const { data, error } = await db.from("players").select("id, password_hash").ilike("pseudo", pseudoPattern(pseudo)).not("password_hash", "is", null).limit(2);
+      if (error) throw error;
+      const rows = (data ?? []) as Array<{ id: string; password_hash: string }>;
+      // Même message dans tous les cas, pour ne pas révéler quels pseudos existent.
+      if (rows.length !== 1 || !(await verifyPassword(password, rows[0]!.password_hash))) {
+        throw new HttpError(401, "Pseudo ou mot de passe incorrect");
+      }
+      return await openSession(rows[0]!.id);
+    }
+    case "set_password": {
+      // Comptes créés avant les mots de passe (ou via Google/Facebook) : choisir un mot de passe.
+      const p = await auth(body.token);
+      const password = typeof body.password === "string" ? body.password : "";
+      const problem = E.checkPassword(password);
+      if (problem) throw new HttpError(400, problem);
+      const { data: row, error: readError } = await db.from("players").select("password_hash").eq("id", p.id).single();
+      if (readError) throw readError;
+      if (row.password_hash) throw new HttpError(400, "Ce compte a déjà un mot de passe");
+      if (await pseudoTaken(p.pseudo, p.id)) {
+        throw new HttpError(400, "Un autre compte porte déjà ce pseudo : demande à l'organisateur de renommer l'un des deux");
+      }
+      const { data, error } = await db.from("players").update({ password_hash: await hashPassword(password) }).eq("id", p.id).select(PLAYER_COLS).single();
+      if (error) throw error;
+      return { me: data };
+    }
+    case "oauth_login": {
+      // Retour de Google ou Facebook : le jeton Supabase Auth est vérifié, puis le compte du jeu est retrouvé ou créé.
+      const accessToken = typeof body.access_token === "string" ? body.access_token : "";
+      if (!accessToken) throw new HttpError(400, "Connexion incomplète");
+      const { data: u, error: authError } = await db.auth.getUser(accessToken);
+      if (authError || !u.user) throw new HttpError(401, "Connexion Google ou Facebook refusée, réessaie");
+      const provider = u.user.app_metadata?.provider;
+      if (provider !== "google" && provider !== "facebook") throw new HttpError(400, "Mode de connexion non pris en charge");
+      const { data: existing, error: findError } = await db.from("players").select("id").eq("auth_user_id", u.user.id).maybeSingle();
+      if (findError) throw findError;
+      if (existing) return await openSession(existing.id);
+      if (!(await allowRegistration(caller))) {
+        throw new HttpError(429, "Trop d'inscriptions depuis cette connexion. Réessayez plus tard.");
+      }
+      const meta = u.user.user_metadata ?? {};
+      const base = E.pseudoFromName(String(meta.full_name ?? meta.name ?? u.user.email ?? "Joueur"));
+      for (let n = 1; n <= 50; n++) {
+        const pseudo = E.pseudoVariant(base, n);
+        if (await pseudoTaken(pseudo)) continue;
+        const token = randomToken();
+        const { data, error } = await db
+          .from("players")
+          .insert({ pseudo, token_hash: await sha256(token), balance: E.STARTING_CREDITS, auth_user_id: u.user.id, auth_provider: provider })
+          .select(PLAYER_COLS)
+          .single();
+        if (error?.code === "23505") continue;
+        if (error) throw error;
+        return { token, me: data };
+      }
+      throw new HttpError(500, "Impossible de choisir un pseudo, réessaie");
     }
     case "me": {
       const p = await auth(body.token);

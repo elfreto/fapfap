@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { STAKES, STARTING_CREDITS, requiredBalance } from "@fapfap/engine";
-import { ApiError, type Me, type TableView, call, loadToken, saveToken } from "./api.ts";
+import { ApiError, type Me, type TableView, call, finishOAuth, loadToken, saveToken } from "./api.ts";
+import { SetPassword, Welcome } from "./Login.tsx";
 import { Avatar, type AvatarChoice, AvatarPicker } from "./Avatar.tsx";
 import { Rules } from "./Rules.tsx";
 import { Table } from "./Table.tsx";
@@ -57,6 +58,23 @@ export function App() {
     }
   }, []);
 
+  // Retour de Google ou Facebook (?code=… dans l'adresse).
+  useEffect(() => {
+    run(async () => {
+      const r = await finishOAuth();
+      if (!r) return;
+      saveToken(r.token);
+      setMe(r.me);
+      setToken(r.token);
+    });
+  }, [run]);
+
+  const signedIn = (r: { token: string; me: Me }) => {
+    saveToken(r.token);
+    setMe(r.me);
+    setToken(r.token);
+  };
+
   // Reprise de session : profil, puis table en cours ou invitation.
   useEffect(() => {
     if (!token) return;
@@ -79,14 +97,8 @@ export function App() {
         error={error}
         hasInvite={!!inviteCode()}
         onRules={() => setShowRules(true)}
-        onRegister={(pseudo) =>
-          run(async () => {
-            const r = await call<{ token: string; me: Me }>("register", { pseudo });
-            saveToken(r.token);
-            setMe(r.me);
-            setToken(r.token);
-          })
-        }
+        onRegister={(pseudo, password) => run(async () => signedIn(await call<{ token: string; me: Me }>("register", { pseudo, password })))}
+        onLogin={(pseudo, password) => run(async () => signedIn(await call<{ token: string; me: Me }>("login", { pseudo, password })))}
         rules={showRules ? <Rules onClose={() => setShowRules(false)} /> : null}
       />
     );
@@ -124,6 +136,10 @@ export function App() {
       me={me}
       onTransactions={() => openPage("transactions")}
       onAdmin={() => openPage("admin")}
+      onSetPassword={async (password) => {
+        const r = await call<{ me: Me }>("set_password", { token, password });
+        setMe(r.me);
+      }}
       onLogout={() => {
         saveToken(null);
         setToken(null);
@@ -166,45 +182,6 @@ export function App() {
   );
 }
 
-function Welcome(props: {
-  busy: boolean;
-  error: string | null;
-  hasInvite: boolean;
-  onRegister: (pseudo: string) => void;
-  onRules: () => void;
-  rules: React.ReactNode;
-}) {
-  const [pseudo, setPseudo] = useState("");
-  return (
-    <main className="screen center">
-      <div className="panel">
-        <h1 className="logo">
-          FapFap <span>♣♦♥♠</span>
-        </h1>
-        <p className="muted">Prototype de test entre amis. Crédits virtuels, sans aucune valeur.</p>
-        {props.hasInvite && <p className="notice">Vous avez été invité à une table. Choisissez un pseudo pour la rejoindre.</p>}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (pseudo.trim()) props.onRegister(pseudo.trim());
-          }}
-        >
-          <label htmlFor="pseudo">Votre pseudo</label>
-          <input id="pseudo" value={pseudo} maxLength={20} onChange={(e) => setPseudo(e.target.value)} autoFocus />
-          <button className="btn primary" disabled={props.busy || !pseudo.trim()}>
-            Entrer
-          </button>
-        </form>
-        {props.error && <p className="error">{props.error}</p>}
-        <button type="button" className="btn ghost" onClick={props.onRules}>
-          Lire les règles
-        </button>
-      </div>
-      {props.rules}
-    </main>
-  );
-}
-
 function Home(props: {
   me: Me;
   busy: boolean;
@@ -215,6 +192,7 @@ function Home(props: {
   onTransactions: () => void;
   onAdmin: () => void;
   onLogout: () => void;
+  onSetPassword: (password: string) => Promise<void>;
   onAvatar: (choice: AvatarChoice) => Promise<void>;
   onRules: () => void;
   rules: React.ReactNode;
@@ -251,6 +229,7 @@ function Home(props: {
             Administration
           </button>
         )}
+        {!me.has_login && <SetPassword onSave={props.onSetPassword} />}
         {me.balance < STARTING_CREDITS && (
           <button type="button" className="btn" onClick={props.onReload} disabled={props.busy}>
             Recharger à {STARTING_CREDITS.toLocaleString("fr-FR")} (prototype)
@@ -305,8 +284,20 @@ function Home(props: {
               <b>Se déconnecter ?</b>
             </p>
             <p className="small">
-              Il n'y a pas de mot de passe : une fois déconnecté, tu ne pourras plus revenir sur le compte <b>{me.pseudo}</b> ni sur ses{" "}
-              {me.balance.toLocaleString("fr-FR")} crédits.
+              {me.has_login ? (
+                me.auth_provider ? (
+                  <>Tu pourras revenir avec le bouton {me.auth_provider === "google" ? "Gmail" : "Facebook"}.</>
+                ) : (
+                  <>
+                    Tu pourras revenir avec ton pseudo <b>{me.pseudo}</b> et ton mot de passe.
+                  </>
+                )
+              ) : (
+                <>
+                  Ce compte n'a pas de mot de passe : une fois déconnecté, tu ne pourras plus revenir sur <b>{me.pseudo}</b> ni sur ses{" "}
+                  {me.balance.toLocaleString("fr-FR")} crédits. Choisis d'abord un mot de passe ci-dessus.
+                </>
+              )}
             </p>
             <div className="row">
               <button type="button" className="btn danger" onClick={props.onLogout}>
