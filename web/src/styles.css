@@ -405,3 +405,7 @@ button.card { cursor: pointer; }
 .adm-btn:disabled { opacity: 0.5; cursor: wait; }
 .adm-fieldset { display: grid; gap: 8px; margin: 0; padding: 14px; border: 1px solid #ffffff2a; border-radius: 16px; }
 .adm-fieldset legend { padding: 0 6px; color: var(--gold); font-weight: 800; }
+.logout { color: #ffb4a9; border-color: #ffb4a966; }
+.logout-confirm { display: grid; gap: 8px; padding: 14px; border-radius: 14px; border: 1px solid #ffb4a988; background: #5c1a1a55; }
+.logout-confirm p { margin: 0; }
+.logout-confirm .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

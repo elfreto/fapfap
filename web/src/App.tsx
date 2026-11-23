@@ -124,6 +124,14 @@ export function App() {
       me={me}
       onTransactions={() => openPage("transactions")}
       onAdmin={() => openPage("admin")}
+      onLogout={() => {
+        saveToken(null);
+        setToken(null);
+        setMe(null);
+        setView(null);
+        setInvite(null);
+        openPage("home");
+      }}
       busy={busy}
       error={error}
       onRules={() => setShowRules(true)}
@@ -206,11 +214,13 @@ function Home(props: {
   onReload: () => void;
   onTransactions: () => void;
   onAdmin: () => void;
+  onLogout: () => void;
   onAvatar: (choice: AvatarChoice) => Promise<void>;
   onRules: () => void;
   rules: React.ReactNode;
 }) {
   const [picker, setPicker] = useState(false);
+  const [logout, setLogout] = useState(false);
   const [stake, setStake] = useState(100);
   const [capacity, setCapacity] = useState(4);
   const [code, setCode] = useState("");
@@ -289,6 +299,29 @@ function Home(props: {
         <button type="button" className="btn ghost" onClick={props.onRules}>
           Règles du jeu
         </button>
+        {logout ? (
+          <div className="logout-confirm" role="alertdialog" aria-labelledby="logout-title">
+            <p id="logout-title">
+              <b>Se déconnecter ?</b>
+            </p>
+            <p className="small">
+              Il n'y a pas de mot de passe : une fois déconnecté, tu ne pourras plus revenir sur le compte <b>{me.pseudo}</b> ni sur ses{" "}
+              {me.balance.toLocaleString("fr-FR")} crédits.
+            </p>
+            <div className="row">
+              <button type="button" className="btn danger" onClick={props.onLogout}>
+                Me déconnecter
+              </button>
+              <button type="button" className="btn ghost" onClick={() => setLogout(false)}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" className="btn ghost logout" onClick={() => setLogout(true)}>
+            Déconnexion
+          </button>
+        )}
       </div>
       {picker && <AvatarPicker me={me} onSave={props.onAvatar} onClose={() => setPicker(false)} />}
       {props.rules}

@@ -512,7 +512,7 @@ function rotateFrom(list: string[], start: string): string[] {
 function Outcome({ won, gross, onHide, onNext, canNext }: { won: boolean; gross: number; onHide: () => void; onNext: () => void; canNext: boolean }) {
   return (
     <div className={`outcome ${won ? "win" : "lost"}`}>
-      <h2 className="outcome-title">{won ? "TU AS WIN LE GIO" : "TU AS LOST LE GIO"}</h2>
+      <h2 className="outcome-title">{won ? "TU AS WIN LE GUIO" : "TU AS LOST LE GUIO"}</h2>
       {won && (
         <p className="outcome-gain">
           <b>+ {fmt(gross)}</b>
