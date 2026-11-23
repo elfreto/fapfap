@@ -420,3 +420,4 @@ button.card { cursor: pointer; }
 .google .oauth-logo { color: #4285f4; border: 2px solid #4285f4; font-size: 0.8rem; }
 .facebook .oauth-logo { background: #fff; color: #1877f2; font-size: 1rem; }
 .secure-account { display: grid; gap: 8px; padding: 12px; border-radius: 14px; border: 1px solid var(--gold); background: #f2c14e14; }
+.row.two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

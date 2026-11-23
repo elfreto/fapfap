@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { STAKES, STARTING_CREDITS, requiredBalance } from "@fapfap/engine";
 import { ApiError, type Me, type TableView, call, finishOAuth, loadToken, saveToken } from "./api.ts";
-import { SetPassword, Welcome } from "./Login.tsx";
+import { ChangePassword, SetPassword, Welcome } from "./Login.tsx";
 import { Avatar, type AvatarChoice, AvatarPicker } from "./Avatar.tsx";
 import { Rules } from "./Rules.tsx";
 import { Table } from "./Table.tsx";
@@ -136,6 +136,10 @@ export function App() {
       me={me}
       onTransactions={() => openPage("transactions")}
       onAdmin={() => openPage("admin")}
+      onChangePassword={async (current, password) => {
+        const r = await call<{ me: Me }>("change_password", { token, current, password });
+        setMe(r.me);
+      }}
       onSetPassword={async (password) => {
         const r = await call<{ me: Me }>("set_password", { token, password });
         setMe(r.me);
@@ -193,12 +197,14 @@ function Home(props: {
   onAdmin: () => void;
   onLogout: () => void;
   onSetPassword: (password: string) => Promise<void>;
+  onChangePassword: (current: string, password: string) => Promise<void>;
   onAvatar: (choice: AvatarChoice) => Promise<void>;
   onRules: () => void;
   rules: React.ReactNode;
 }) {
   const [picker, setPicker] = useState(false);
   const [logout, setLogout] = useState(false);
+  const [changePw, setChangePw] = useState(false);
   const [stake, setStake] = useState(100);
   const [capacity, setCapacity] = useState(4);
   const [code, setCode] = useState("");
@@ -278,6 +284,14 @@ function Home(props: {
         <button type="button" className="btn ghost" onClick={props.onRules}>
           Règles du jeu
         </button>
+        {me.has_login && !me.auth_provider &&
+          (changePw ? (
+            <ChangePassword onSave={props.onChangePassword} onClose={() => setChangePw(false)} />
+          ) : (
+            <button type="button" className="btn ghost" onClick={() => setChangePw(true)}>
+              Changer de mot de passe
+            </button>
+          ))}
         {logout ? (
           <div className="logout-confirm" role="alertdialog" aria-labelledby="logout-title">
             <p id="logout-title">
