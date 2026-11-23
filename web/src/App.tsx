@@ -4,6 +4,7 @@ import { ApiError, type Me, type TableView, call, loadToken, saveToken } from ".
 import { Avatar, type AvatarChoice, AvatarPicker } from "./Avatar.tsx";
 import { Rules } from "./Rules.tsx";
 import { Table } from "./Table.tsx";
+import { Transactions } from "./Transactions.tsx";
 
 function inviteCode(): string | null {
   const t = new URLSearchParams(location.search).get("t");
@@ -24,6 +25,11 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  const [page, setPage] = useState<"home" | "transactions">(() => (location.pathname.endsWith("/transactions") ? "transactions" : "home"));
+  const openPage = useCallback((p: "home" | "transactions") => {
+    setPage(p);
+    history.replaceState(null, "", p === "transactions" ? "/transactions" + location.search : "/" + location.search);
+  }, []);
 
   const run = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -96,9 +102,14 @@ export function App() {
     );
   }
 
+  if (page === "transactions") {
+    return <Transactions token={token} me={me} onMe={setMe} onBack={() => openPage("home")} />;
+  }
+
   return (
     <Home
       me={me}
+      onTransactions={() => openPage("transactions")}
       busy={busy}
       error={error}
       onRules={() => setShowRules(true)}
@@ -179,6 +190,7 @@ function Home(props: {
   onCreate: (stake: number, capacity: number) => void;
   onJoin: (code: string) => void;
   onReload: () => void;
+  onTransactions: () => void;
   onAvatar: (choice: AvatarChoice) => Promise<void>;
   onRules: () => void;
   rules: React.ReactNode;
@@ -206,6 +218,9 @@ function Home(props: {
         <p className="balance">
           {me.balance.toLocaleString("fr-FR")} <small>crédits virtuels</small>
         </p>
+        <button type="button" className="btn primary home-tx" onClick={props.onTransactions}>
+          Dépôt et retrait
+        </button>
         {me.balance < STARTING_CREDITS && (
           <button type="button" className="btn" onClick={props.onReload} disabled={props.busy}>
             Recharger à {STARTING_CREDITS.toLocaleString("fr-FR")} (prototype)

@@ -18,6 +18,7 @@ const CORS = {
 const GRACE_MS = 2000;
 
 const PLAYER_COLS = "id, pseudo, balance, table_id, avatar";
+const TX_COLS = "id, kind, method, amount, reference, account, status, created_at";
 
 /** Limites par personne. Une partie normale fait moins de 30 appels par minute. */
 const CALLS_PER_MINUTE = 120;
@@ -339,6 +340,55 @@ async function handle(body: Record<string, unknown>, caller: string) {
       if (error) throw error;
       await db.from("ledger").insert({ player_id: p.id, amount, reason: "recharge" });
       return { me: { ...p, balance: E.STARTING_CREDITS } };
+    }
+    case "transactions": {
+      const p = await auth(body.token);
+      const [txs, accounts] = await Promise.all([
+        db.from("transactions").select(TX_COLS).eq("player_id", p.id).order("created_at", { ascending: false }).limit(30),
+        db.from("payment_accounts").select("method, account, ussd, note"),
+      ]);
+      if (txs.error) throw txs.error;
+      if (accounts.error) throw accounts.error;
+      return { me: p, transactions: txs.data, accounts: accounts.data };
+    }
+    case "deposit":
+    case "withdraw": {
+      const p = await auth(body.token);
+      const kind: E.TransactionKind = action === "deposit" ? "depot" : "retrait";
+      const req = {
+        method: String(body.method ?? ""),
+        amount: Number(body.amount),
+        reference: typeof body.reference === "string" ? body.reference : "",
+        account: typeof body.account === "string" ? body.account : "",
+      };
+      const problem = E.checkRequest(kind, req, p.balance);
+      if (problem) throw new HttpError(400, problem);
+      if (kind === "retrait" && p.table_id) throw new HttpError(400, "Quitte ta table avant de demander un retrait");
+      const { data, error } = await db.rpc("request_transaction", {
+        p_player: p.id,
+        p_kind: kind,
+        p_method: req.method,
+        p_amount: req.amount,
+        p_reference: kind === "depot" ? E.cleanReference(req.reference) : null,
+        p_account: kind === "retrait" ? E.cleanAccount(req.method, req.account) : null,
+        p_max_pending: E.MAX_PENDING,
+      });
+      if (error) {
+        const m = String(error.message);
+        if (m.includes("trop_de_demandes")) throw new HttpError(400, `${E.MAX_PENDING} demandes sont déjà en attente. Attends leur traitement.`);
+        if (m.includes("solde_insuffisant")) throw new HttpError(400, "Solde retirable insuffisant");
+        throw error;
+      }
+      return { me: { ...p, balance: data.balance }, transaction: data.transaction };
+    }
+    case "cancel_transaction": {
+      const p = await auth(body.token);
+      const { data, error } = await db.rpc("close_transaction", { p_id: Number(body.id), p_status: "annulee", p_player: p.id });
+      if (error) {
+        if (String(error.message).includes("demande_introuvable")) throw new HttpError(400, "Cette demande ne peut plus être annulée");
+        throw error;
+      }
+      return { me: { ...p, balance: data } };
     }
     case "avatar": {
       const p = await auth(body.token);

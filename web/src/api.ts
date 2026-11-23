@@ -92,3 +92,22 @@ export function saveToken(token: string | null) {
     /* navigation privée : la session ne survivra pas au rechargement */
   }
 }
+
+export interface Transaction {
+  id: number;
+  kind: "depot" | "retrait";
+  method: "paypal" | "mobile_money" | "orange_money";
+  amount: number;
+  reference: string | null;
+  account: string | null;
+  status: "en_attente" | "validee" | "refusee" | "annulee";
+  created_at: string;
+}
+
+/** Coordonnées où envoyer un dépôt, renseignées par l'administrateur. */
+export interface PaymentAccount {
+  method: Transaction["method"];
+  account: string;
+  ussd: string;
+  note: string;
+}
