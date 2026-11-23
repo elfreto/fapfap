@@ -5,6 +5,15 @@ import { Avatar, type AvatarChoice, AvatarPicker } from "./Avatar.tsx";
 import { Rules } from "./Rules.tsx";
 import { Table } from "./Table.tsx";
 import { Transactions } from "./Transactions.tsx";
+import { Admin } from "./Admin.tsx";
+
+type Page = "home" | "transactions" | "admin";
+
+function pageFromUrl(): Page {
+  if (location.pathname.endsWith("/transactions")) return "transactions";
+  if (location.pathname.endsWith("/admin")) return "admin";
+  return "home";
+}
 
 function inviteCode(): string | null {
   const t = new URLSearchParams(location.search).get("t");
@@ -25,10 +34,10 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showRules, setShowRules] = useState(false);
-  const [page, setPage] = useState<"home" | "transactions">(() => (location.pathname.endsWith("/transactions") ? "transactions" : "home"));
-  const openPage = useCallback((p: "home" | "transactions") => {
+  const [page, setPage] = useState<Page>(pageFromUrl);
+  const openPage = useCallback((p: Page) => {
     setPage(p);
-    history.replaceState(null, "", p === "transactions" ? "/transactions" + location.search : "/" + location.search);
+    history.replaceState(null, "", (p === "home" ? "/" : `/${p}`) + location.search);
   }, []);
 
   const run = useCallback(async (fn: () => Promise<void>) => {
@@ -106,10 +115,15 @@ export function App() {
     return <Transactions token={token} me={me} onMe={setMe} onBack={() => openPage("home")} />;
   }
 
+  if (page === "admin" && me.is_admin) {
+    return <Admin token={token} onBack={() => openPage("home")} />;
+  }
+
   return (
     <Home
       me={me}
       onTransactions={() => openPage("transactions")}
+      onAdmin={() => openPage("admin")}
       busy={busy}
       error={error}
       onRules={() => setShowRules(true)}
@@ -191,6 +205,7 @@ function Home(props: {
   onJoin: (code: string) => void;
   onReload: () => void;
   onTransactions: () => void;
+  onAdmin: () => void;
   onAvatar: (choice: AvatarChoice) => Promise<void>;
   onRules: () => void;
   rules: React.ReactNode;
@@ -221,6 +236,11 @@ function Home(props: {
         <button type="button" className="btn primary home-tx" onClick={props.onTransactions}>
           Dépôt et retrait
         </button>
+        {me.is_admin && (
+          <button type="button" className="btn home-admin" onClick={props.onAdmin}>
+            Administration
+          </button>
+        )}
         {me.balance < STARTING_CREDITS && (
           <button type="button" className="btn" onClick={props.onReload} disabled={props.busy}>
             Recharger à {STARTING_CREDITS.toLocaleString("fr-FR")} (prototype)

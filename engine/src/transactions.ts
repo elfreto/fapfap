@@ -99,3 +99,20 @@ export function cleanAccount(method: string, raw: string): string | null {
   }
   return isEmail(raw) ? raw.trim().toLowerCase() : null;
 }
+
+/**
+ * Clé d'unicité d'une référence de dépôt : sans espaces ni différence de majuscules.
+ * Une même référence ne peut servir qu'une fois (règle de LeCerf du 23/11/2026) ; la base applique la même clé.
+ */
+export function referenceKey(raw: string): string {
+  return raw.replace(/\s+/g, "").toLowerCase();
+}
+
+/** Coordonnées de dépôt saisies par l'administrateur. */
+export function checkPaymentAccount(a: { account: string; ussd: string; note: string }): string | null {
+  if (a.account.length > 120) return "Coordonnées trop longues (120 caractères maximum)";
+  if (a.ussd.length > 60) return "Code USSD trop long (60 caractères maximum)";
+  if (a.ussd && !/^[*#\d{}a-z]+$/i.test(a.ussd)) return "Le code USSD ne peut contenir que des chiffres, *, # et {montant}";
+  if (a.note.length > 200) return "Note trop longue (200 caractères maximum)";
+  return null;
+}

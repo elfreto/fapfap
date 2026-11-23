@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PAYMENT_METHODS, checkAmount, checkRequest, cleanAccount, cleanReference, normalizePhone } from "../src/transactions.ts";
+import { PAYMENT_METHODS, checkAmount, checkPaymentAccount, checkRequest, cleanAccount, cleanReference, normalizePhone, referenceKey } from "../src/transactions.ts";
 
 describe("transactions", () => {
   it("propose PayPal, Mobile Money et Orange Money, sans IBAN", () => {
@@ -29,5 +29,17 @@ describe("transactions", () => {
     expect(normalizePhone("+237 699-00-11-22")).toBe("237699001122");
     expect(cleanAccount("orange_money", "+237 699 00 11 22")).toBe("+237699001122");
     expect(cleanAccount("paypal", " Moi@Exemple.fr ")).toBe("moi@exemple.fr");
+  });
+});
+
+describe("référence unique et coordonnées admin", () => {
+  it("ignore espaces et majuscules", () => {
+    expect(referenceKey(" MP2311 ab ")).toBe(referenceKey("mp2311AB"));
+    expect(referenceKey("MP1")).not.toBe(referenceKey("MP2"));
+  });
+  it("vérifie les coordonnées de dépôt", () => {
+    expect(checkPaymentAccount({ account: "+237 670 00 00 00", ussd: "*126*1*1*670000000*{montant}#", note: "" })).toBeNull();
+    expect(checkPaymentAccount({ account: "", ussd: "*126*<script>", note: "" })).not.toBeNull();
+    expect(checkPaymentAccount({ account: "x".repeat(121), ussd: "", note: "" })).not.toBeNull();
   });
 });

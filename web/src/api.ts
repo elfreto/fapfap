@@ -18,6 +18,7 @@ export interface Me {
   balance: number;
   table_id?: string | null;
   avatar?: string | null;
+  is_admin?: boolean;
 }
 
 export interface PublicRound {
@@ -110,4 +111,10 @@ export interface PaymentAccount {
   account: string;
   ussd: string;
   note: string;
+}
+
+/** Demande vue par l'administrateur, avec le joueur concerné. */
+export interface AdminTransaction extends Transaction {
+  processed_at: string | null;
+  player: { pseudo: string; balance: number } | null;
 }
