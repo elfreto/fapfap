@@ -19,6 +19,9 @@ export interface Me {
   table_id?: string | null;
   avatar?: string | null;
   is_admin?: boolean;
+  /** Le joueur peut se reconnecter (mot de passe, Google ou Facebook). */
+  has_login?: boolean;
+  auth_provider?: "google" | "facebook" | null;
 }
 
 export interface PublicRound {
@@ -117,4 +120,59 @@ export interface PaymentAccount {
 export interface AdminTransaction extends Transaction {
   processed_at: string | null;
   player: { pseudo: string; balance: number } | null;
+}
+
+export type LoginProvider = "google" | "facebook";
+
+let authClient: Promise<SupabaseClient> | null = null;
+/** Client Supabase Auth, utilisé seulement pour la connexion Google ou Facebook (aller-retour PKCE). */
+export function oauthClient(): Promise<SupabaseClient> {
+  authClient ??= import("@supabase/supabase-js").then((m) =>
+    m.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { flowType: "pkce", persistSession: true, detectSessionInUrl: false, storageKey: "fapfap.oauth", autoRefreshToken: false },
+    }),
+  );
+  return authClient;
+}
+
+/** Fournisseurs activés dans Supabase (Google, Facebook). */
+export async function enabledProviders(): Promise<Record<LoginProvider, boolean>> {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/settings`, { headers: { apikey: SUPABASE_KEY } });
+    const body = await res.json();
+    return { google: body?.external?.google === true, facebook: body?.external?.facebook === true };
+  } catch {
+    return { google: false, facebook: false };
+  }
+}
+
+/** Part vers Google ou Facebook ; le retour se fait sur la page actuelle avec ?code=… */
+export async function startOAuth(provider: LoginProvider) {
+  const sb = await oauthClient();
+  const back = new URL(location.href);
+  back.searchParams.delete("code");
+  const { error } = await sb.auth.signInWithOAuth({ provider, options: { redirectTo: back.toString() } });
+  if (error) throw new ApiError(400, error.message);
+}
+
+/** Au retour de Google ou Facebook : échange le code contre une session Supabase, puis contre un jeton du jeu. */
+export async function finishOAuth(): Promise<{ token: string; me: Me } | null> {
+  const url = new URL(location.href);
+  const code = url.searchParams.get("code");
+  const failure = url.searchParams.get("error_description");
+  if (!code && !failure) return null;
+  url.searchParams.delete("code");
+  url.searchParams.delete("error");
+  url.searchParams.delete("error_code");
+  url.searchParams.delete("error_description");
+  history.replaceState(null, "", url);
+  if (failure) throw new ApiError(400, `Connexion annulée : ${failure}`);
+  const sb = await oauthClient();
+  const { data, error } = await sb.auth.exchangeCodeForSession(code!);
+  if (error || !data.session) throw new ApiError(400, "Connexion Google ou Facebook interrompue, réessaie");
+  try {
+    return await call<{ token: string; me: Me }>("oauth_login", { access_token: data.session.access_token });
+  } finally {
+    await sb.auth.signOut({ scope: "local" }).catch(() => undefined);
+  }
 }
