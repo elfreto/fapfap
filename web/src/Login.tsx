@@ -157,3 +157,62 @@ export function SetPassword({ onSave }: { onSave: (password: string) => Promise<
     </form>
   );
 }
+
+/** Changer de mot de passe (comptes avec mot de passe) : mot de passe actuel, puis le nouveau deux fois. */
+export function ChangePassword({ onSave, onClose }: { onSave: (current: string, password: string) => Promise<void>; onClose: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const problem =
+    (password && checkPassword(password)) || (confirm && confirm !== password ? "Les deux mots de passe sont différents" : null) || null;
+  const ready = !!current && !!password && confirm === password && !problem;
+  if (done) {
+    return (
+      <div className="secure-account">
+        <b>Mot de passe changé.</b>
+        <button type="button" className="btn ghost" onClick={onClose}>
+          Fermer
+        </button>
+      </div>
+    );
+  }
+  return (
+    <form
+      className="secure-account"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!ready) return;
+        setBusy(true);
+        setError(null);
+        try {
+          await onSave(current, password);
+          setDone(true);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <b>Changer de mot de passe</b>
+      <label htmlFor="pw-current">Mot de passe actuel</label>
+      <input id="pw-current" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+      <label htmlFor="pw-new">Nouveau mot de passe</label>
+      <input id="pw-new" type="password" autoComplete="new-password" placeholder={`Au moins ${PASSWORD_MIN} caractères`} value={password} onChange={(e) => setPassword(e.target.value)} />
+      <label htmlFor="pw-confirm">Confirme le nouveau mot de passe</label>
+      <input id="pw-confirm" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+      {(problem || error) && <p className="error">{problem ?? error}</p>}
+      <div className="row two">
+        <button className="btn primary" disabled={busy || !ready}>
+          Enregistrer
+        </button>
+        <button type="button" className="btn ghost" onClick={onClose}>
+          Annuler
+        </button>
+      </div>
+    </form>
+  );
+}

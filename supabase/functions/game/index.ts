@@ -439,6 +439,21 @@ async function handle(body: Record<string, unknown>, caller: string) {
       if (error) throw error;
       return { me: data };
     }
+    case "change_password": {
+      const p = await auth(body.token);
+      const current = typeof body.current === "string" ? body.current : "";
+      const password = typeof body.password === "string" ? body.password : "";
+      const problem = E.checkPassword(password);
+      if (problem) throw new HttpError(400, problem);
+      if (!(await allowLogin(caller, p.pseudo))) throw new HttpError(429, "Trop d'essais. Réessaie dans 15 minutes.");
+      const { data: row, error: readError } = await db.from("players").select("password_hash").eq("id", p.id).single();
+      if (readError) throw readError;
+      if (!row.password_hash) throw new HttpError(400, "Ce compte n'a pas encore de mot de passe");
+      if (!(await verifyPassword(current, row.password_hash))) throw new HttpError(400, "Mot de passe actuel incorrect");
+      const { data, error } = await db.from("players").update({ password_hash: await hashPassword(password) }).eq("id", p.id).select(PLAYER_COLS).single();
+      if (error) throw error;
+      return { me: data };
+    }
     case "oauth_login": {
       // Retour de Google ou Facebook : le jeton Supabase Auth est vérifié, puis le compte du jeu est retrouvé ou créé.
       const accessToken = typeof body.access_token === "string" ? body.access_token : "";
