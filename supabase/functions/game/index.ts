@@ -17,7 +17,7 @@ const CORS = {
 /** Marge accordée au-delà du délai de jeu pour la latence réseau. */
 const GRACE_MS = 2000;
 
-const PLAYER_COLS = "id, pseudo, balance, table_id, avatar";
+const PLAYER_COLS = "id, pseudo, balance, table_id, avatar, is_admin";
 const TX_COLS = "id, kind, method, amount, reference, account, status, created_at";
 
 /** Limites par personne. Une partie normale fait moins de 30 appels par minute. */
@@ -39,6 +39,7 @@ interface Player {
   balance: number;
   table_id: string | null;
   avatar: string | null;
+  is_admin?: boolean;
 }
 
 interface TableRow {
@@ -114,6 +115,12 @@ async function auth(token: unknown): Promise<Player> {
   if (error) throw error;
   if (!data) throw new HttpError(401, "Session invalide, reconnectez-vous");
   return data as Player;
+}
+
+async function requireAdmin(token: unknown): Promise<Player> {
+  const p = await auth(token);
+  if (!p.is_admin) throw new HttpError(403, "Page réservée à l'administrateur");
+  return p;
 }
 
 async function loadTable(code: unknown): Promise<TableRow> {
@@ -302,7 +309,7 @@ async function removeOldPhoto(old: string | null, current: string | null) {
 function viewOf(player: Player, { table: t, players }: Loaded) {
   const r = t.state.round;
   return {
-    me: { id: player.id, pseudo: player.pseudo, balance: players[player.id]?.balance ?? player.balance, avatar: players[player.id]?.avatar ?? player.avatar },
+    me: { id: player.id, pseudo: player.pseudo, balance: players[player.id]?.balance ?? player.balance, avatar: players[player.id]?.avatar ?? player.avatar, is_admin: player.is_admin },
     table: publicData(t, players),
     hand: r ? r.hands[player.id] ?? [] : [],
     legal: r ? E.legalCards(r, player.id) : [],
@@ -377,6 +384,7 @@ async function handle(body: Record<string, unknown>, caller: string) {
         const m = String(error.message);
         if (m.includes("trop_de_demandes")) throw new HttpError(400, `${E.MAX_PENDING} demandes sont déjà en attente. Attends leur traitement.`);
         if (m.includes("solde_insuffisant")) throw new HttpError(400, "Solde retirable insuffisant");
+        if (m.includes("reference_deja_utilisee")) throw new HttpError(400, "Cette référence de transfert a déjà été utilisée");
         throw error;
       }
       return { me: { ...p, balance: data.balance }, transaction: data.transaction };
@@ -389,6 +397,46 @@ async function handle(body: Record<string, unknown>, caller: string) {
         throw error;
       }
       return { me: { ...p, balance: data } };
+    }
+    case "admin_list": {
+      await requireAdmin(body.token);
+      const cols = `${TX_COLS}, processed_at, player:players!transactions_player_id_fkey(pseudo, balance)`;
+      const [pending, done, accounts] = await Promise.all([
+        db.from("transactions").select(cols).eq("status", "en_attente").order("created_at", { ascending: true }).limit(200),
+        db.from("transactions").select(cols).neq("status", "en_attente").order("processed_at", { ascending: false }).limit(50),
+        db.from("payment_accounts").select("method, account, ussd, note"),
+      ]);
+      for (const r of [pending, done, accounts]) if (r.error) throw r.error;
+      return { pending: pending.data, done: done.data, accounts: accounts.data };
+    }
+    case "admin_close": {
+      const admin = await requireAdmin(body.token);
+      const status = body.status === "validee" ? "validee" : body.status === "refusee" ? "refusee" : null;
+      if (!status) throw new HttpError(400, "Décision invalide");
+      const { data, error } = await db.rpc("admin_close_transaction", { p_id: Number(body.id), p_status: status, p_admin: admin.id });
+      if (error) {
+        if (String(error.message).includes("demande_introuvable")) throw new HttpError(400, "Cette demande a déjà été traitée");
+        throw error;
+      }
+      return { ok: true, balance: data };
+    }
+    case "admin_accounts": {
+      await requireAdmin(body.token);
+      const list = Array.isArray(body.accounts) ? body.accounts : [];
+      const rows = list.map((a: Record<string, unknown>) => ({
+        method: String(a.method ?? ""),
+        account: String(a.account ?? "").trim(),
+        ussd: String(a.ussd ?? "").replace(/\s+/g, ""),
+        note: String(a.note ?? "").trim(),
+      }));
+      for (const r of rows) {
+        if (!E.methodInfo(r.method)) throw new HttpError(400, "Moyen de paiement inconnu");
+        const problem = E.checkPaymentAccount(r);
+        if (problem) throw new HttpError(400, `${E.methodInfo(r.method)!.label} : ${problem}`);
+      }
+      const { error } = await db.from("payment_accounts").upsert(rows, { onConflict: "method" });
+      if (error) throw error;
+      return { ok: true };
     }
     case "avatar": {
       const p = await auth(body.token);
