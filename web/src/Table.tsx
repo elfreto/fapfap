@@ -166,9 +166,10 @@ export function Table({
   }, [round]);
 
   async function share() {
-    const url = `${location.origin}${location.pathname}?t=${code}`;
+    const url = `${location.origin}/?t=${code}`;
+    const text = table.isPrivate ? `Rejoins ma table privée FapFap (code ${code}). Demande-moi le mot de passe.` : `Rejoins ma table FapFap (code ${code})`;
     try {
-      if (navigator.share) await navigator.share({ title: "FapFap", text: `Rejoins ma table FapFap (code ${code})`, url });
+      if (navigator.share) await navigator.share({ title: "FapFap", text, url });
       else {
         await navigator.clipboard.writeText(url);
         setCopied(true);
@@ -257,7 +258,9 @@ export function Table({
           <div className="center-info">
             {!round && (
               <>
-                <p>{table.seats.length < 2 ? `Partagez le code ${code} pour inviter vos amis.` : "Tout le monde est prêt ?"}</p>
+                <p>{table.seats.length < 2
+                    ? `Partagez le code ${code}${table.isPrivate ? " et le mot de passe" : ""} pour inviter vos amis.`
+                    : "Tout le monde est prêt ?"}</p>
                 {table.seats.length < table.capacity && (
                   <button type="button" className="btn small" onClick={share}>
                     {copied ? "Lien copié" : "Inviter"}

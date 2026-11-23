@@ -47,3 +47,13 @@ export function pseudoVariant(base: string, n: number): string {
   const suffix = String(n);
   return base.slice(0, PSEUDO_MAX - suffix.length) + suffix;
 }
+
+/** Tables privées (décision de LeCerf du 23/11/2026) : une table est publique, ou privée avec un mot de passe. */
+export const TABLE_PASSWORD_MIN = 4;
+export const TABLE_PASSWORD_MAX = 32;
+
+export function checkTablePassword(pw: string): string | null {
+  if (pw.length < TABLE_PASSWORD_MIN) return `Le mot de passe de la table doit faire au moins ${TABLE_PASSWORD_MIN} caractères`;
+  if (pw.length > TABLE_PASSWORD_MAX) return `Le mot de passe de la table doit faire au plus ${TABLE_PASSWORD_MAX} caractères`;
+  return null;
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkPassword, checkPseudo, pseudoFromName, pseudoVariant } from "../src/accounts.ts";
+import { checkPassword, checkPseudo, checkTablePassword, pseudoFromName, pseudoVariant } from "../src/accounts.ts";
 
 describe("comptes", () => {
   it("contrôle le pseudo", () => {
@@ -19,5 +19,10 @@ describe("comptes", () => {
     expect(checkPseudo(pseudoFromName("Émilie N'Dour"))).toBeNull();
     expect(pseudoVariant("Jean", 1)).toBe("Jean");
     expect(pseudoVariant("a".repeat(20), 12)).toBe("a".repeat(18) + "12");
+  });
+  it("contrôle le mot de passe d'une table privée", () => {
+    expect(checkTablePassword("1234")).toBeNull();
+    expect(checkTablePassword("123")).toMatch(/au moins/);
+    expect(checkTablePassword("x".repeat(33))).toMatch(/au plus/);
   });
 });
