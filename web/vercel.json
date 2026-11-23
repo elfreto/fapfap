@@ -11,6 +11,14 @@
     {
       "source": "/admin",
       "destination": "/index.html"
+    },
+    {
+      "source": "/salon",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/profil",
+      "destination": "/index.html"
     }
   ]
 }

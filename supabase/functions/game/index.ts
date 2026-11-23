@@ -28,11 +28,13 @@ const REGISTRATIONS_PER_DAY = 15;
 const LOGIN_TRIES_PER_CALLER = 20;
 const LOGIN_TRIES_PER_PSEUDO = 10;
 const PBKDF2_ITERATIONS = 100_000;
+/** Essais de mot de passe de table privée, par connexion, sur 15 minutes. */
+const TABLE_PASSWORD_TRIES = 20;
 /** Les tables fermées sont supprimées après ce délai. */
 const CLOSED_TABLE_TTL_MS = 24 * 3600 * 1000;
 
 class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public code?: string) {
     super(message);
   }
 }
@@ -58,6 +60,9 @@ interface TableRow {
   first_player: string | null;
   state: { round: E.RoundState | null; deadline: string | null };
   version: number;
+  is_private?: boolean;
+  password_hash?: string | null;
+  created_by?: string | null;
 }
 
 function json(body: unknown, status = 200) {
@@ -235,6 +240,7 @@ function publicData(t: TableRow, players: Record<string, Player>) {
     id: t.id,
     stake: t.stake,
     capacity: t.capacity,
+    isPrivate: !!t.is_private,
     status: t.status,
     seats: t.seats,
     roundNo: t.round_no,
@@ -489,6 +495,41 @@ async function handle(body: Record<string, unknown>, caller: string) {
       const p = await auth(body.token);
       return { me: p };
     }
+    case "lobby": {
+      // Salon : toutes les tables ouvertes (en attente ou en jeu), les plus récentes d'abord.
+      const p = await auth(body.token);
+      const { data, error } = await db
+        .from("game_tables")
+        .select("id, stake, capacity, seats, status, is_private, created_by, created_at")
+        .neq("status", "closed")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      type Row = { id: string; stake: number; capacity: number; seats: string[]; status: string; is_private: boolean; created_by: string | null; created_at: string };
+      const rows = ((data ?? []) as Row[]).filter((r) => r.seats.length > 0);
+      const players = await loadPlayers([...new Set(rows.flatMap((r) => (r.created_by ? [...r.seats, r.created_by] : r.seats)))]);
+      const tables = rows.map((r) => ({
+        id: r.id,
+        stake: r.stake,
+        capacity: r.capacity,
+        status: r.status,
+        isPrivate: r.is_private,
+        host: players[r.created_by ?? r.seats[0]!]?.pseudo ?? null,
+        players: r.seats.map((id) => ({ id, pseudo: players[id]?.pseudo ?? "?", avatar: players[id]?.avatar ?? null })),
+        createdAt: r.created_at,
+      }));
+      return { me: p, tables };
+    }
+    case "profile": {
+      const p = await auth(body.token);
+      const [info, stats] = await Promise.all([
+        db.from("players").select("created_at").eq("id", p.id).single(),
+        db.rpc("player_stats", { p_player: p.id }),
+      ]);
+      if (info.error) throw info.error;
+      if (stats.error) throw stats.error;
+      return { me: p, profile: { createdAt: info.data.created_at, ...stats.data } };
+    }
     case "reload": {
       const p = await auth(body.token);
       if (p.balance >= E.STARTING_CREDITS) throw new HttpError(400, "Recharge possible seulement sous 10 000 crédits");
@@ -600,6 +641,12 @@ async function handle(body: Record<string, unknown>, caller: string) {
       const p = await auth(body.token);
       const stake = Number(body.stake);
       const capacity = Number(body.capacity);
+      const isPrivate = body.private === true;
+      const tablePassword = typeof body.password === "string" ? body.password : "";
+      if (isPrivate) {
+        const problem = E.checkTablePassword(tablePassword);
+        if (problem) throw new HttpError(400, problem);
+      }
       if (!E.isValidStake(stake)) throw new HttpError(400, "Mise invalide");
       if (!E.isValidCapacity(capacity)) throw new HttpError(400, "Une table accepte 2, 3 ou 4 joueurs");
       if (!E.canPlay(p.balance, stake)) throw new HttpError(400, "Solde insuffisant, recharger");
@@ -607,10 +654,13 @@ async function handle(body: Record<string, unknown>, caller: string) {
       await leaveCurrent(p);
       // Ménage : les tables fermées depuis plus d'un jour sont supprimées.
       await db.from("game_tables").delete().eq("status", "closed").lt("updated_at", new Date(Date.now() - CLOSED_TABLE_TTL_MS).toISOString());
+      const passwordHash = isPrivate ? await hashPassword(tablePassword) : null;
       let code = "";
       for (let i = 0; i < 5; i++) {
         code = randomCode();
-        const { error } = await db.from("game_tables").insert({ id: code, stake, capacity, seats: [], status: "waiting" });
+        const { error } = await db
+          .from("game_tables")
+          .insert({ id: code, stake, capacity, seats: [], status: "waiting", is_private: isPrivate, password_hash: passwordHash, created_by: p.id });
         if (!error) break;
         if (i === 4) throw error;
       }
@@ -625,6 +675,14 @@ async function handle(body: Record<string, unknown>, caller: string) {
       }
       if (t.status === "closed") throw new HttpError(400, "Cette table est fermée");
       if (t.seats.length >= t.capacity) throw new HttpError(400, "La table est complète");
+      if (t.is_private && !(t.state.round?.players ?? []).includes(p.id)) {
+        const given = typeof body.password === "string" ? body.password : "";
+        if (!given) throw new HttpError(403, "Cette table est privée : saisis son mot de passe", "table_password");
+        const { data: allowed, error: rateError } = await db.rpc("rate_hit", { p_key: `tablepw:${caller}`, p_seconds: 900, p_max: TABLE_PASSWORD_TRIES });
+        if (rateError) throw rateError;
+        if (allowed !== true) throw new HttpError(429, "Trop d'essais. Réessaie dans 15 minutes.");
+        if (!(await verifyPassword(given, t.password_hash ?? ""))) throw new HttpError(403, "Mot de passe de la table incorrect", "table_password");
+      }
       if (!E.canPlay(p.balance, t.stake)) throw new HttpError(400, "Solde insuffisant, recharger");
       const engaged = await engagedTable(p.id);
       if (engaged && engaged !== t.id) throw new HttpError(400, "Terminez d'abord votre manche en cours");
@@ -707,7 +765,7 @@ Deno.serve(async (req) => {
       return json(await handle(body, caller));
     } catch (e) {
       if (e instanceof HttpError && e.status === 409 && attempt < 3) continue;
-      if (e instanceof HttpError) return json({ error: e.message }, e.status);
+      if (e instanceof HttpError) return json({ error: e.message, code: e.code }, e.status);
       if (e instanceof E.RuleError) return json({ error: e.message, code: e.code }, 400);
       console.error(e);
       return json({ error: "Erreur serveur" }, 500);

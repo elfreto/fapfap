@@ -37,6 +37,8 @@ export interface PublicTable {
   id: string;
   stake: number;
   capacity: number;
+  /** Table privée : il faut son mot de passe pour s'y asseoir. */
+  isPrivate?: boolean;
   status: "waiting" | "playing" | "closed";
   seats: string[];
   roundNo: number;
@@ -57,7 +59,7 @@ export interface TableView {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public code?: string) {
     super(message);
   }
 }
@@ -74,7 +76,7 @@ export async function call<T>(action: string, params: Record<string, unknown> = 
     throw new ApiError(0, "Connexion interrompue, nouvelle tentative…");
   }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, body.error ?? "Erreur inattendue");
+  if (!res.ok) throw new ApiError(res.status, body.error ?? "Erreur inattendue", body.code);
   return body as T;
 }
 
@@ -175,4 +177,25 @@ export async function finishOAuth(): Promise<{ token: string; me: Me } | null> {
   } finally {
     await sb.auth.signOut({ scope: "local" }).catch(() => undefined);
   }
+}
+
+/** Table ouverte affichée dans le Salon. */
+export interface LobbyTable {
+  id: string;
+  stake: number;
+  capacity: number;
+  status: "waiting" | "playing";
+  isPrivate: boolean;
+  host: string | null;
+  players: Array<{ id: string; pseudo: string; avatar: string | null }>;
+  createdAt: string;
+}
+
+/** Données de la page Profil. */
+export interface ProfileData {
+  createdAt: string;
+  rounds: number;
+  wins: number;
+  gained: number;
+  lost: number;
 }
